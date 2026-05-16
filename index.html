@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CryptoSignal Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="header-left">
+        <div class="logo">&#x1f537; CryptoSignal</div>
+        <span class="disclaimer">Not financial advice &mdash; educational use only</span>
+      </div>
+      <div class="header-right">
+        <select id="pairSelector"></select>
+        <select id="timeframeSelector">
+          <option value="5m">5m</option>
+          <option value="15m" selected>15m</option>
+          <option value="1h">1h</option>
+          <option value="4h">4h</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="ticker-bar" id="tickerBar"></div>
+
+    <main>
+      <div class="dashboard-grid">
+        <section class="chart-section">
+          <div class="section-header">
+            <h2>Chart</h2>
+            <div class="chart-controls">
+              <button class="btn-icon" id="backtestBtn" title="Quick Backtest (last 50 candles)">&#x1f9ee;</button>
+              <button class="btn-icon" id="exportBtn" title="Export Signal History to CSV">&#x1f4e5;</button>
+            </div>
+          </div>
+          <div id="chartContainer"></div>
+        </section>
+
+        <section class="signals-section">
+          <h2>Active Signals</h2>
+          <div id="signalPanel"></div>
+        </section>
+      </div>
+
+      <section class="market-overview-section">
+        <h2>Market Overview</h2>
+        <div id="marketGrid"></div>
+      </section>
+
+      <section class="hot-pairs-section" id="hotPairsSection">
+        <h2>&#x26a1; Hot Pairs</h2>
+        <div id="hotPairsGrid"></div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

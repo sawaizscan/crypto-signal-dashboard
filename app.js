@@ -1,0 +1,212 @@
+/**
+ * App — main orchestrator for the CryptoSignal Dashboard
+ * Initializes modules, runs the real-time loop, handles user interaction
+ */
+
+import { DataFetcher } from './modules/dataFetcher.js';
+import { computeAllIndicators } from './modules/indicators.js';
+import { SignalEngine } from './modules/signalEngine.js';
+import { UIRenderer } from './modules/uiRenderer.js';
+
+class App {
+  constructor() {
+    this.fetcher = new DataFetcher();
+    this.engine = new SignalEngine();
+    this.ui = new UIRenderer();
+
+    this.currentSymbol = 'BTCUSDT';
+    this.interval = '15m';
+    this.allTickers = [];
+    this.candles = [];
+    this.signals = [];
+    this.refreshTimer = null;
+    this.hotPairs = [];
+    this.ready = false;
+  }
+
+  async init() {
+    try {
+      this.ui.showLoading('signalPanel', 'Initializing...');
+      this.ui.showLoading('marketGrid', 'Loading markets...');
+
+      this.ui.initChart('chartContainer');
+
+      const { klines, tickers } = await this.fetcher.fetchInitialData(this.currentSymbol, this.interval);
+      this.candles = klines;
+      this.allTickers = tickers;
+
+      if (tickers.length > 0 && !tickers.some(t => t.symbol === this.currentSymbol)) {
+        this.currentSymbol = tickers[0].symbol;
+      }
+
+      this.ui.populatePairSelector(tickers, this.currentSymbol);
+      this.ui.renderTickerBar(tickers, this.currentSymbol);
+      this.ui.renderMarketOverview(tickers);
+
+      await this.analyzeAndRender();
+      this.detectHotPairs();
+
+      this.ready = true;
+      this.startRefreshLoop();
+      this.bindEvents();
+    } catch (err) {
+      console.error('Init error:', err);
+      this.ui.showError('signalPanel', 'Failed to load data. Check console for details.');
+      this.ui.showError('marketGrid', 'Retrying...');
+      setTimeout(() => this.init(), 5000);
+    }
+  }
+
+  async analyzeAndRender() {
+    if (!this.candles || this.candles.length < 30) {
+      this.ui.showLoading('signalPanel', 'Insufficient data...');
+      return;
+    }
+
+    const ind = computeAllIndicators(this.candles);
+    const signal = this.engine.generateSignal(this.currentSymbol, this.candles, ind);
+
+    const signalEntry = this.signals.find(s => s.pair === this.currentSymbol);
+    if (signalEntry) {
+      Object.assign(signalEntry, signal);
+    } else {
+      this.signals.push(signal);
+    }
+
+    if (this.engine.isNewSignal(signal)) {
+      this.ui.playAlertSound();
+    }
+
+    this.ui.updateChart(this.candles, ind);
+    this.ui.renderSignal(signal);
+  }
+
+  async scanAllSignals() {
+    const topPairs = this.allTickers.slice(0, 10);
+
+    const signalPromises = topPairs.map(async (ticker) => {
+      try {
+        const klines = await this.fetcher.fetchKlines(ticker.symbol, this.interval, 100);
+        if (klines.length < 30) return null;
+        const ind = computeAllIndicators(klines);
+        return this.engine.generateSignal(ticker.symbol, klines, ind);
+      } catch {
+        return null;
+      }
+    });
+
+    const results = (await Promise.all(signalPromises)).filter(Boolean);
+
+    results.sort((a, b) => {
+      const scoreA = a.type === 'BUY' ? a.confidence : a.type === 'SELL' ? a.confidence : -a.confidence;
+      const scoreB = b.type === 'BUY' ? b.confidence : b.type === 'SELL' ? b.confidence : -b.confidence;
+      return scoreB - scoreA;
+    });
+
+    for (const s of results) {
+      const existing = this.signals.find(x => x.pair === s.pair);
+      if (existing) Object.assign(existing, s);
+      else this.signals.push(s);
+    }
+
+    this.ui.renderSignalsList(results.slice(0, 5));
+  }
+
+  detectHotPairs() {
+    this.hotPairs = this.allTickers
+      .filter(t => t.volume > 0)
+      .map(t => {
+        const avgVol = this.allTickers.reduce((s, x) => s + x.volume, 0) / this.allTickers.length;
+        const surgeRatio = t.volume / (avgVol || 1);
+        return { ...t, surgeRatio };
+      })
+      .filter(t => t.surgeRatio > 2.5 && Math.abs(t.change) > 3)
+      .sort((a, b) => b.surgeRatio - a.surgeRatio)
+      .slice(0, 6);
+
+    this.ui.renderHotPairs(this.hotPairs);
+  }
+
+  async refreshData() {
+    try {
+      const tickers = await this.fetcher.fetchTopPairs(30);
+      this.allTickers = tickers;
+
+      this.ui.renderTickerBar(tickers, this.currentSymbol);
+      this.ui.renderMarketOverview(tickers);
+
+      const klines = await this.fetcher.fetchKlines(this.currentSymbol, this.interval, 100);
+      this.candles = klines;
+
+      await this.analyzeAndRender();
+      this.detectHotPairs();
+      this.scanAllSignals();
+    } catch (err) {
+      console.error('Refresh error:', err);
+    }
+  }
+
+  startRefreshLoop() {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = setInterval(() => this.refreshData(), 30000);
+  }
+
+  async changePair(symbol) {
+    if (symbol === this.currentSymbol) return;
+    this.currentSymbol = symbol;
+    this.ui.showLoading('signalPanel', 'Loading pair...');
+
+    try {
+      const klines = await this.fetcher.fetchKlines(symbol, this.interval, 100);
+      this.candles = klines;
+
+      document.getElementById('pairSelector').value = symbol;
+      this.ui.renderTickerBar(this.allTickers, symbol);
+
+      await this.analyzeAndRender();
+    } catch (err) {
+      console.error('Pair change error:', err);
+      this.ui.showError('signalPanel', 'Error loading pair data');
+    }
+  }
+
+  async changeTimeframe(tf) {
+    this.interval = tf;
+    this.ui.showLoading('signalPanel', 'Changing timeframe...');
+
+    try {
+      const klines = await this.fetcher.fetchKlines(this.currentSymbol, tf, 100);
+      this.candles = klines;
+      await this.analyzeAndRender();
+    } catch (err) {
+      console.error('Timeframe change error:', err);
+    }
+  }
+
+  bindEvents() {
+    document.getElementById('pairSelector').addEventListener('change', (e) => {
+      this.changePair(e.target.value);
+    });
+
+    document.getElementById('timeframeSelector').addEventListener('change', (e) => {
+      this.changeTimeframe(e.target.value);
+    });
+
+    document.addEventListener('pair-change', (e) => {
+      this.changePair(e.detail);
+    });
+
+    document.getElementById('backtestBtn').addEventListener('click', () => {
+      if (this.candles.length < 50) return;
+      const results = this.engine.runBacktest(this.candles);
+      this.ui.showBacktestModal(results);
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      this.ui.exportSignalHistoryToCSV(this.engine.signalHistory);
+    });
+  }
+}
+
+const app = new App();
+app.init();
