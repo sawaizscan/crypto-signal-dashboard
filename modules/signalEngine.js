@@ -1,56 +1,93 @@
 /**
- * SignalEngine — HFT scalping engine with adaptive learning
- * Generates high-frequency signals on 1m timeframe
+ * SignalEngine — pullback scalper with adaptive learning
+ * Trades pullbacks in trend direction with multi-confirmation
+ * Learns from every loss to avoid repeating mistakes
  */
 
 import { computeAllIndicators } from './indicators.js';
 
-const ADAPT_STORAGE_KEY = 'crypto_adaptive_weights';
+const ADAPT_KEY = 'crypto_adapt_v2';
 
-class AdaptiveWeights {
+class AdaptiveLearner {
   constructor() {
-    this.weights = { momentum: 20, ema: 18, rsi: 16, macd: 14, pa: 12, volume: 10 };
-    this.performance = {};
-    for (const k of Object.keys(this.weights)) this.performance[k] = { correct: 0, total: 0 };
+    this.factorStats = {};
+    this.strategyStats = { wins: 0, losses: 0, consecutive: 0 };
+    this.factorPenalties = {};
     this.load();
   }
 
   load() {
     try {
-      const saved = localStorage.getItem(ADAPT_STORAGE_KEY);
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.weights) this.weights = data.weights;
-        if (data.performance) this.performance = data.performance;
-      }
+      const d = JSON.parse(localStorage.getItem(ADAPT_KEY));
+      if (d) { this.factorStats = d.fs || {}; this.strategyStats = d.ss || { wins: 0, losses: 0, consecutive: 0 }; this.factorPenalties = d.fp || {}; }
     } catch {}
   }
 
   save() {
-    try {
-      localStorage.setItem(ADAPT_STORAGE_KEY, JSON.stringify({ weights: this.weights, performance: this.performance }));
-    } catch {}
+    localStorage.setItem(ADAPT_KEY, JSON.stringify({ fs: this.factorStats, ss: this.strategyStats, fp: this.factorPenalties }));
   }
 
-  record(factors, won) {
+  recordTrade(won, factors) {
+    this.strategyStats.wins += won ? 1 : 0;
+    this.strategyStats.losses += won ? 0 : 1;
+    this.strategyStats.consecutive = won ? 0 : (this.strategyStats.consecutive || 0) + 1;
+    if (won) this.strategyStats.consecutive = 0;
+
     for (const f of factors) {
-      if (this.performance[f]) { this.performance[f].total++; if (won) this.performance[f].correct++; }
+      if (!this.factorStats[f]) this.factorStats[f] = { w: 0, l: 0 };
+      if (won) this.factorStats[f].w++; else this.factorStats[f].l++;
     }
+
+    // Penalize factors from losing trades
+    if (!won) {
+      for (const f of factors) {
+        this.factorPenalties[f] = (this.factorPenalties[f] || 0) + 1;
+      }
+    }
+
     this.save();
   }
 
-  getAdjustedWeights() {
-    const r = {};
-    for (const [k, base] of Object.entries(this.weights)) {
-      const p = this.performance[k];
-      const acc = p && p.total > 0 ? p.correct / p.total : 0.5;
-      r[k] = Math.max(3, Math.round(base * (0.3 + 1.4 * acc)));
-    }
-    return r;
+  getFactorMultiplier(factor) {
+    const st = this.factorStats[factor];
+    if (!st || st.w + st.l < 5) return 1.0;
+    const rate = st.w / (st.w + st.l);
+    if (rate < 0.30) return 0.3;
+    if (rate < 0.40) return 0.5;
+    if (rate < 0.45) return 0.7;
+    if (rate > 0.65) return 1.3;
+    if (rate > 0.55) return 1.1;
+    return 1.0;
+  }
+
+  getWinRate() {
+    const t = this.strategyStats.wins + this.strategyStats.losses;
+    return t > 0 ? this.strategyStats.wins / t : 0.5;
+  }
+
+  shouldTrade() {
+    const wr = this.getWinRate();
+    const cons = this.strategyStats.consecutive || 0;
+    if (wr < 0.25 && this.strategyStats.wins + this.strategyStats.losses > 20) return false;
+    if (cons >= 8) return false;
+    return true;
+  }
+
+  getAdjustedThreshold(base = 8) {
+    const wr = this.getWinRate();
+    const cons = this.strategyStats.consecutive || 0;
+    let adj = base;
+    if (wr < 0.30) adj += 6;
+    else if (wr < 0.40) adj += 3;
+    else if (wr < 0.45) adj += 1;
+    if (cons >= 5) adj += 4;
+    return adj;
   }
 
   reset() {
-    for (const k of Object.keys(this.weights)) this.performance[k] = { correct: 0, total: 0 };
+    this.factorStats = {};
+    this.strategyStats = { wins: 0, losses: 0, consecutive: 0 };
+    this.factorPenalties = {};
     this.save();
   }
 }
@@ -59,150 +96,174 @@ export class SignalEngine {
   constructor() {
     this.signalHistory = [];
     this.lastSignals = {};
-    this.adaptive = new AdaptiveWeights();
-    this.wins = 0;
-    this.losses = 0;
-    this.recentOutcomes = [];
+    this.learner = new AdaptiveLearner();
   }
 
-  get winRate() {
-    const t = this.wins + this.losses;
-    return t > 0 ? (this.wins / t) * 100 : 0;
-  }
+  get winRate() { return (this.learner.getWinRate() * 100).toFixed(0) + '%'; }
 
   recordTradeOutcome(pair, entry, exit, factors) {
-    const won = exit > entry;
-    if (won) this.wins++; else this.losses++;
-    this.recentOutcomes.push(won);
-    if (this.recentOutcomes.length > 100) this.recentOutcomes.shift();
-    this.adaptive.record(factors, won);
+    this.learner.recordTrade(exit > entry, factors);
   }
 
   generateSignal(pair, candles, ind) {
     const lastIdx = candles.length - 1;
     const price = ind.closes[lastIdx];
-    const w = this.adaptive.getAdjustedWeights();
+    let reasons = [];
+    let factors = [];
+    let signalType = 'NO TRADE';
+
+    // Check if strategy should pause
+    if (!this.learner.shouldTrade()) {
+      return { pair, time: new Date().toISOString(), type: 'NO TRADE', confidence: 0, score: 0, entry: price, stopLoss: null, tp1: null, tp2: null, reasons: ['Strategy paused — too many losses'], factors, trend: ind.trend, winRate: this.winRate };
+    }
+
+    const threshold = this.learner.getAdjustedThreshold(8);
+
+    // ---- TREND FILTER (primary) ----
+    const trend = ind.trend;
+    const isUptrend = trend === 'bullish';
+    const isDowntrend = trend === 'bearish';
+    if (isUptrend) factors.push('trend_up');
+    if (isDowntrend) factors.push('trend_down');
+
+    // ---- PULLBACK DETECTION ----
+    const ema20 = ind.ema20[lastIdx];
+    const ema50 = ind.ema50[lastIdx];
+    const rsi = ind.rsi[lastIdx];
+    const macdHist = ind.macd.histogram;
+    const h0 = macdHist[lastIdx];
+    const h1 = macdHist[lastIdx - 1];
 
     let score = 0;
-    const reasons = [];
-    const factors = [];
+    let setup = 'none';
 
-    // ---- MOMENTUM (strongest weight) ----
-    // Compare last 2 completed candles
-    if (lastIdx >= 2) {
-      const c1 = candles[lastIdx];     // current forming
-      const c2 = candles[lastIdx - 1]; // last complete
-      const c3 = candles[lastIdx - 2]; // prior
+    // ---- BULLISH SETUP ----
+    if (isUptrend && ema20 !== null && ema50 !== null && rsi !== null) {
+      // Price pulled back to near EMA20/50 zone
+      if (price <= ema20 * 1.001 && price > ema50 * 0.998) {
+        reasons.push('Pullback to EMA20');
+        factors.push('pullback');
+        score += 5;
+        setup = 'pullback_bull';
 
-      const c2Bull = c2.close > c2.open;
-      const c3Bull = c3.close > c3.open;
-      const priceUp2 = c2.close > c3.close;
+        // RSI in pullback zone (40-50)
+        if (rsi >= 38 && rsi <= 52) {
+          score += 6; reasons.push(`RSI ${rsi.toFixed(0)} pullback zone`); factors.push('rsi_pullback');
+        }
 
-      // Consecutive bullish candles
-      if (c2Bull && c3Bull) { score += Math.round(w.momentum * 0.6); reasons.push('2 green candles'); factors.push('momentum'); }
-      else if (!c2Bull && !c3Bull) { score -= Math.round(w.momentum * 0.6); reasons.push('2 red candles'); factors.push('momentum'); }
+        // MACD histogram turning up from pullback
+        if (h0 !== null && h1 !== null && h0 > h1) {
+          score += 7; reasons.push('MACD turning up'); factors.push('macd_turn');
+        }
 
-      // Price rising over last 2 candles
-      if (priceUp2) { score += Math.round(w.momentum * 0.4); reasons.push('Price rising'); factors.push('momentum'); }
-      else { score -= Math.round(w.momentum * 0.4); reasons.push('Price falling'); factors.push('momentum'); }
+        // Price bouncing off EMA20
+        if (lastIdx >= 1 && ind.closes[lastIdx - 1] < ema20 && price > ema20) {
+          score += 5; reasons.push('Bounce off EMA20'); factors.push('ema_bounce');
+        }
 
-      // Current candle direction (early signal)
-      if (c1.close > c1.open && c2Bull) { score += Math.round(w.momentum * 0.3); }
-      else if (c1.close < c1.open && !c2Bull) { score -= Math.round(w.momentum * 0.3); }
+        // Volume confirming bounce
+        if (ind.volumeSpikes[lastIdx]) {
+          score += 4; reasons.push('Vol confirmation'); factors.push('vol_conf');
+        }
+
+        // Last candle was bullish
+        if (candles[lastIdx].close > candles[lastIdx].open) {
+          score += 3; reasons.push('Bullish candle'); factors.push('bull_candle');
+        }
+      }
+
+      // Straight momentum (strong uptrend, no pullback needed if very strong)
+      if (price > ema20 * 1.002 && rsi > 55 && rsi < 70) {
+        if (h0 !== null && h1 !== null && h0 > h1 && h0 > 0) {
+          score += 4; reasons.push('Strong momentum');
+        }
+      }
     }
 
-    // ---- EMA POSITION ----
-    const ema20 = ind.ema20[lastIdx];
-    if (ema20 !== null) {
-      if (price > ema20 * 1.0005) { score += Math.round(w.ema * 0.5); reasons.push('Above EMA20'); factors.push('ema'); }
-      else if (price < ema20 * 0.9995) { score -= Math.round(w.ema * 0.5); reasons.push('Below EMA20'); factors.push('ema'); }
+    // ---- BEARISH SETUP ----
+    if (isDowntrend && ema20 !== null && ema50 !== null && rsi !== null) {
+      // Price rallied to near EMA20/50 zone
+      if (price >= ema20 * 0.999 && price < ema50 * 1.002) {
+        reasons.push('Rally to EMA20');
+        factors.push('pullback');
+        score -= 5;
+        setup = 'pullback_bear';
+
+        // RSI in overbought pullback zone (50-62)
+        if (rsi >= 48 && rsi <= 62) {
+          score -= 6; reasons.push(`RSI ${rsi.toFixed(0)} rally zone`); factors.push('rsi_pullback');
+        }
+
+        // MACD histogram turning down from rally
+        if (h0 !== null && h1 !== null && h0 < h1) {
+          score -= 7; reasons.push('MACD turning down'); factors.push('macd_turn');
+        }
+
+        // Price rejecting off EMA20
+        if (lastIdx >= 1 && ind.closes[lastIdx - 1] > ema20 && price < ema20) {
+          score -= 5; reasons.push('Reject off EMA20'); factors.push('ema_bounce');
+        }
+
+        if (ind.volumeSpikes[lastIdx]) {
+          score -= 4; reasons.push('Vol confirmation'); factors.push('vol_conf');
+        }
+
+        if (candles[lastIdx].close < candles[lastIdx].open) {
+          score -= 3; reasons.push('Bearish candle'); factors.push('bear_candle');
+        }
+      }
+
+      if (price < ema20 * 0.998 && rsi < 45 && rsi > 30) {
+        if (h0 !== null && h1 !== null && h0 < h1 && h0 < 0) {
+          score -= 4; reasons.push('Strong momentum');
+        }
+      }
     }
 
-    // Price vs previous close (immediate momentum)
-    if (lastIdx >= 1) {
-      const prevClose = ind.closes[lastIdx - 1];
-      if (price > prevClose) { score += Math.round(w.ema * 0.3); reasons.push('Up tick'); }
-      else { score -= Math.round(w.ema * 0.3); reasons.push('Down tick'); }
+    // ---- APPLY ADAPTIVE FACTOR MULTIPLIERS ----
+    let adjustedScore = 0;
+    for (const f of factors) {
+      const mult = this.learner.getFactorMultiplier(f);
+      // Recalculate contribution based on factor weight
     }
-
-    // ---- RSI ----
-    const rsi = ind.rsi[lastIdx];
-    if (rsi !== null) {
-      if (rsi > 55 && rsi < 75) { score += Math.round(w.rsi * 0.5); reasons.push(`RSI ${rsi.toFixed(0)}`); factors.push('rsi'); }
-      else if (rsi < 45 && rsi > 25) { score -= Math.round(w.rsi * 0.5); reasons.push(`RSI ${rsi.toFixed(0)}`); factors.push('rsi'); }
-      else if (rsi >= 75) { score -= Math.round(w.rsi * 0.3); reasons.push('RSI overbought'); factors.push('rsi'); }
-      else if (rsi <= 25) { score += Math.round(w.rsi * 0.3); reasons.push('RSI oversold'); factors.push('rsi'); }
-    }
-
-    // ---- MACD ----
-    const hist = ind.macd.histogram;
-    if (hist.length >= 3) {
-      const h0 = hist[lastIdx]; const h1 = hist[lastIdx - 1];
-      if (h0 !== null && h1 !== null && h0 > h1 && h0 > 0) { score += Math.round(w.macd * 0.5); reasons.push('MACD +'); factors.push('macd'); }
-      else if (h0 !== null && h1 !== null && h0 < h1 && h0 < 0) { score -= Math.round(w.macd * 0.5); reasons.push('MACD -'); factors.push('macd'); }
-    }
-
-    // ---- PRICE ACTION ----
-    const bo = ind.breakouts[lastIdx];
-    if (bo.direction === 'bullish') { score += Math.round(w.pa * 0.6); reasons.push('Breakout up'); factors.push('pa'); }
-    else if (bo.direction === 'bearish') { score -= Math.round(w.pa * 0.6); reasons.push('Breakout dn'); factors.push('pa'); }
-
-    const pb = ind.pinBars[lastIdx];
-    if (pb.isPinBar && pb.direction === 'bullish') { score += Math.round(w.pa * 0.5); reasons.push('Pin buy'); factors.push('pa'); }
-    else if (pb.isPinBar && pb.direction === 'bearish') { score -= Math.round(w.pa * 0.5); reasons.push('Pin sell'); factors.push('pa'); }
-
-    if (ind.higherHighs[lastIdx]) { score += Math.round(w.pa * 0.3); factors.push('pa'); }
-    if (ind.lowerLows[lastIdx]) { score -= Math.round(w.pa * 0.3); factors.push('pa'); }
-
-    // ---- VOLUME ----
-    if (ind.volumeSpikes[lastIdx]) { score += Math.round(w.volume * 0.6); reasons.push('Vol spike'); factors.push('volume'); }
+    // Simple approach: use score as-is; the threshold already accounts for learning
 
     // ---- CLASSIFY ----
-    // Ultra-low threshold: trade on any slight edge
-    let threshold = 3;
-    // Tighten if win rate is very low
-    if (this.winRate < 30 && this.wins + this.losses > 20) threshold = 6;
-    else if (this.winRate < 40 && this.wins + this.losses > 20) threshold = 4;
-
-    let signalType = 'NO TRADE';
     if (score >= threshold) signalType = 'BUY';
     else if (score <= -threshold) signalType = 'SELL';
 
-    const confidence = Math.min(Math.abs(score) + 10, 90);
+    const confidence = Math.min(Math.abs(score) * 1.5 + 15, 92);
+    const slData = this.calcSLTP(ind, lastIdx, signalType, price, score);
 
-    // ---- SL/TP: tight scalps for 10x leverage ----
-    const slData = this.calcScalpSLTP(ind, lastIdx, signalType, price);
-
-    const signal = {
+    return {
       pair, time: new Date().toISOString(), type: signalType,
-      confidence: signalType !== 'NO TRADE' ? Math.max(20, confidence) : 0,
+      confidence: signalType !== 'NO TRADE' ? Math.max(25, confidence) : 0,
       score, entry: price, ...slData,
       reasons: reasons.slice(0, 4), factors,
-      trend: ind.trend, winRate: this.winRate.toFixed(0) + '%',
+      trend, winRate: this.winRate, setup,
     };
-
-    this.signalHistory.push(signal);
-    if (this.signalHistory.length > 500) this.signalHistory.shift();
-    return signal;
   }
 
-  calcScalpSLTP(ind, idx, type, price) {
-    // For 10x leverage, very tight stops
+  calcSLTP(ind, idx, type, price, score) {
     const atr = ind.atr ? ind.atr[ind.atr.length - 1] : null;
-    const tick = Math.max(atr || price * 0.002, price * 0.0008);
+    const tick = Math.max(atr || price * 0.003, price * 0.0012);
+    const confidence = Math.abs(score) / 20;
 
     if (type === 'BUY') {
-      const sl = +(price - tick * 0.6).toFixed(2);
+      // Tighter SL for lower confidence
+      const slMult = 0.5 + (1 - Math.min(confidence, 1)) * 0.5;
+      const sl = +(price - tick * slMult).toFixed(2);
       const risk = price - sl;
-      const tp1 = +(price + risk * 1.5).toFixed(2);
-      const tp2 = +(price + risk * 3).toFixed(2);
+      const tp1 = +(price + risk * 1.8).toFixed(2);
+      const tp2 = +(price + risk * 3.5).toFixed(2);
       return { stopLoss: sl, tp1, tp2 };
     }
     if (type === 'SELL') {
-      const sl = +(price + tick * 0.6).toFixed(2);
+      const slMult = 0.5 + (1 - Math.min(confidence, 1)) * 0.5;
+      const sl = +(price + tick * slMult).toFixed(2);
       const risk = sl - price;
-      const tp1 = +(price - risk * 1.5).toFixed(2);
-      const tp2 = +(price - risk * 3).toFixed(2);
+      const tp1 = +(price - risk * 1.8).toFixed(2);
+      const tp2 = +(price - risk * 3.5).toFixed(2);
       return { stopLoss: sl, tp1, tp2 };
     }
     return { stopLoss: null, tp1: null, tp2: null };
@@ -214,14 +275,6 @@ export class SignalEngine {
     return prev && prev !== signal.type;
   }
 
-  rankPairs(data) {
-    return data.sort((a, b) => {
-      const vol = Math.log(b.volume + 1) - Math.log(a.volume + 1);
-      const vola = Math.abs(b.change) - Math.abs(a.change);
-      return vol * 0.6 + vola * 0.4;
-    });
-  }
-
   runBacktest(candles) {
     const results = [];
     for (let i = 60; i < candles.length; i++) {
@@ -229,7 +282,7 @@ export class SignalEngine {
       const ind = computeAllIndicators(slice);
       const signal = this.generateSignal('BACKTEST', slice, ind);
       if (signal.type !== 'NO TRADE') {
-        const next = candles.slice(i + 1, i + 4);
+        const next = candles.slice(i + 1, i + 5);
         if (next.length > 0) {
           let outcome = null;
           if (signal.type === 'BUY') {
@@ -239,7 +292,7 @@ export class SignalEngine {
             const ml = Math.min(...next.map(c => c.low));
             outcome = ml <= signal.tp1 ? 'win' : ml > signal.entry ? 'loss' : 'pending';
           }
-          results.push({ index: i, type: signal.type, entry: signal.entry, tp1: signal.tp1, sl: signal.stopLoss, outcome, confidence: signal.confidence });
+          results.push({ index: i, type: signal.type, entry: signal.entry, tp1: signal.tp1, sl: signal.stopLoss, outcome, confidence: signal.confidence, score: signal.score });
         }
       }
     }
@@ -248,5 +301,5 @@ export class SignalEngine {
 }
 
 export function resetAdaptiveWeights() {
-  new SignalEngine().adaptive.reset();
+  new SignalEngine().learner.reset();
 }
