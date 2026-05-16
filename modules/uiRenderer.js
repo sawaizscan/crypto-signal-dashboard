@@ -474,4 +474,30 @@ export class UIRenderer {
       }).join('')}
     `;
   }
+
+  renderTestnetStatus(status, message) {
+    const el = document.getElementById('testnetStatus');
+    const badge = document.getElementById('execModeBadge');
+    if (!el) return;
+
+    el.className = `settings-status ${status}`;
+    el.textContent = message;
+
+    if (badge) {
+      if (status === 'connected') {
+        badge.className = 'exec-mode-badge testnet';
+        badge.textContent = 'Testnet';
+      } else {
+        badge.className = 'exec-mode-badge local';
+        badge.textContent = 'Local';
+      }
+    }
+  }
+
+  setTestnetKeyFields(apiKey, secretKey) {
+    const keyEl = document.getElementById('testnetApiKey');
+    const secretEl = document.getElementById('testnetSecretKey');
+    if (keyEl) keyEl.value = apiKey || '';
+    if (secretEl) secretEl.value = secretKey || '';
+  }
 }

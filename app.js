@@ -8,6 +8,7 @@ import { computeAllIndicators } from './modules/indicators.js';
 import { SignalEngine } from './modules/signalEngine.js';
 import { UIRenderer } from './modules/uiRenderer.js';
 import { PaperTrader } from './modules/paperTrader.js';
+import { BinanceTestnet } from './modules/binanceTestnet.js';
 
 class App {
   constructor() {
@@ -15,6 +16,7 @@ class App {
     this.engine = new SignalEngine();
     this.ui = new UIRenderer();
     this.trader = new PaperTrader(10000);
+    this.testnet = new BinanceTestnet();
     this.autoTrade = false;
 
     this.currentSymbol = 'BTCUSDT';
@@ -23,6 +25,9 @@ class App {
     this.candles = [];
     this.signals = [];
     this.refreshTimer = null;
+
+    this._savedApiKey = localStorage.getItem('testnet_api_key') || '';
+    this._savedSecretKey = localStorage.getItem('testnet_secret_key') || '';
     this.hotPairs = [];
     this.ready = false;
   }
@@ -56,10 +61,17 @@ class App {
       this.ready = true;
       this.startRefreshLoop();
       this.bindEvents();
+      this.autoConnectTestnet();
     } catch (err) {
       console.error('Init error:', err);
       this.ui.showError('signalPanel', 'Failed to load data. Check console for details.');
-      this.ui.showError('marketGrid', 'Retrying...');
+      try {
+        this.ui.renderPortfolio(this.trader);
+        this.ui.renderPositions(this.trader);
+        this.ui.renderTradeHistory(this.trader);
+      } catch (_) {}
+      this.ready = true;
+      this.bindEvents();
       setTimeout(() => this.init(), 5000);
     }
   }
@@ -91,7 +103,7 @@ class App {
       const priceMap = {};
       priceMap[signal.pair] = signal.entry;
       this.trader.updatePrices(priceMap);
-      this.trader.executeSignal(signal);
+      await this.trader.executeSignal(signal);
     }
   }
 
@@ -126,7 +138,7 @@ class App {
     if (this.autoTrade) {
       for (const s of results.slice(0, 3)) {
         if (s.type !== 'NO TRADE' && s.confidence >= 55) {
-          this.trader.executeSignal(s);
+          await this.trader.executeSignal(s);
         }
       }
     }
@@ -162,7 +174,7 @@ class App {
         priceMap[t.symbol] = t.price;
       }
       this.trader.updatePrices(priceMap);
-      this.trader.checkStopLosses(priceMap);
+      await this.trader.checkStopLosses(priceMap);
 
       const klines = await this.fetcher.fetchKlines(this.currentSymbol, this.interval, 100);
       this.candles = klines;
@@ -216,6 +228,61 @@ class App {
     }
   }
 
+  async connectTestnet() {
+    const apiKey = document.getElementById('testnetApiKey').value.trim();
+    const secretKey = document.getElementById('testnetSecretKey').value.trim();
+
+    if (!apiKey || !secretKey) {
+      this.ui.renderTestnetStatus('disconnected', 'Please enter both API key and secret key');
+      return;
+    }
+
+    this.ui.renderTestnetStatus('loading', 'Connecting to Binance Futures Testnet...');
+
+    try {
+      const success = await this.testnet.setKeys(apiKey, secretKey);
+      if (success) {
+        this.trader.setExecutor(this.testnet);
+        localStorage.setItem('testnet_api_key', apiKey);
+        localStorage.setItem('testnet_secret_key', secretKey);
+        const balance = this.testnet.getBalance();
+        this.ui.renderTestnetStatus('connected', `Connected. USDT Balance: $${balance.toFixed(2)}`);
+        this.ui.playAlertSound();
+      }
+    } catch (err) {
+      this.ui.renderTestnetStatus('disconnected', `Connection failed: ${err.message}`);
+      this.testnet.disconnect();
+      this.trader.setExecutor(null);
+    }
+  }
+
+  disconnectTestnet() {
+    this.testnet.disconnect();
+    this.trader.setExecutor(null);
+    localStorage.removeItem('testnet_api_key');
+    localStorage.removeItem('testnet_secret_key');
+    this.ui.renderTestnetStatus('disconnected', 'Disconnected from testnet');
+  }
+
+  async autoConnectTestnet() {
+    if (this._savedApiKey && this._savedSecretKey) {
+      this.ui.setTestnetKeyFields(this._savedApiKey, this._savedSecretKey);
+      this.ui.renderTestnetStatus('loading', 'Auto-connecting to testnet...');
+      try {
+        const success = await this.testnet.setKeys(this._savedApiKey, this._savedSecretKey);
+        if (success) {
+          this.trader.setExecutor(this.testnet);
+          const balance = this.testnet.getBalance();
+          this.ui.renderTestnetStatus('connected', `Connected. USDT Balance: $${balance.toFixed(2)}`);
+        }
+      } catch {
+        this.testnet.disconnect();
+        this.trader.setExecutor(null);
+        this.ui.renderTestnetStatus('disconnected', 'Auto-connect failed — check keys in settings');
+      }
+    }
+  }
+
   bindEvents() {
     document.getElementById('pairSelector').addEventListener('change', (e) => {
       this.changePair(e.target.value);
@@ -253,6 +320,19 @@ class App {
         this.ui.renderPositions(this.trader);
         this.ui.renderTradeHistory(this.trader);
       }
+    });
+
+    document.getElementById('settingsToggle').addEventListener('click', () => {
+      const body = document.getElementById('settingsBody');
+      body.classList.toggle('hidden');
+    });
+
+    document.getElementById('connectTestnetBtn').addEventListener('click', () => {
+      this.connectTestnet();
+    });
+
+    document.getElementById('disconnectTestnetBtn').addEventListener('click', () => {
+      this.disconnectTestnet();
     });
   }
 }

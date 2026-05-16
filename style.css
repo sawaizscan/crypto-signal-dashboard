@@ -665,6 +665,139 @@ section h2 {
   font-weight: 600;
 }
 
+.settings-panel {
+  margin-bottom: 16px;
+}
+
+.settings-toggle {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.2s;
+}
+
+.settings-toggle:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.settings-body {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 8px;
+}
+
+.settings-body.hidden {
+  display: none;
+}
+
+.settings-body label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  margin-top: 10px;
+}
+
+.settings-body label:first-child {
+  margin-top: 0;
+}
+
+.settings-body input[type="text"],
+.settings-body input[type="password"] {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.settings-body input:focus {
+  border-color: var(--border-active);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-status {
+  font-size: 0.75rem;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.settings-status.connected {
+  background: var(--green-bg);
+  color: var(--green);
+  border: 1px solid rgba(0, 200, 83, 0.2);
+}
+
+.settings-status.disconnected {
+  background: var(--red-bg);
+  color: var(--red);
+  border: 1px solid rgba(255, 23, 68, 0.2);
+}
+
+.settings-status.loading {
+  background: rgba(41, 121, 255, 0.1);
+  color: var(--blue);
+  border: 1px solid rgba(41, 121, 255, 0.2);
+}
+
+.settings-info {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.settings-info a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.settings-info a:hover {
+  text-decoration: underline;
+}
+
+.exec-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.exec-mode-badge.local {
+  background: rgba(136, 153, 187, 0.1);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.exec-mode-badge.testnet {
+  background: rgba(41, 121, 255, 0.1);
+  color: var(--blue);
+  border: 1px solid rgba(41, 121, 255, 0.2);
+}
+
 @media (max-width: 900px) {
   .dashboard-grid {
     grid-template-columns: 1fr;

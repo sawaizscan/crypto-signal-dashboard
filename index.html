@@ -53,7 +53,7 @@
 
       <section class="portfolio-section">
         <div class="section-header">
-          <h2>&#x1f4b0; Paper Trading Portfolio</h2>
+          <h2>&#x1f4b0; Paper Trading Portfolio <span class="exec-mode-badge local" id="execModeBadge">Local</span></h2>
           <div class="portfolio-controls">
             <label class="toggle-label">
               <span>Auto-Trade</span>
@@ -63,9 +63,35 @@
             <button class="btn-icon" id="resetPortfolioBtn" title="Reset portfolio">&#x1f504;</button>
           </div>
         </div>
-        <div id="portfolioSummary"></div>
-        <div id="positionsPanel"></div>
-        <div id="tradeHistory"></div>
+        <div id="portfolioSummary">
+          <div class="stat-card"><div class="stat-label">Balance</div><div class="stat-value neutral">$10,000</div></div>
+          <div class="stat-card"><div class="stat-label">P&amp;L</div><div class="stat-value neutral">$0.00</div></div>
+          <div class="stat-card"><div class="stat-label">Return</div><div class="stat-value neutral">0.00%</div></div>
+          <div class="stat-card"><div class="stat-label">Open</div><div class="stat-value neutral">0</div></div>
+          <div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value neutral">0</div></div>
+          <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value neutral">0%</div></div>
+        </div>
+        <div id="positionsPanel"><div class="no-positions">No open positions</div></div>
+        <div id="tradeHistory"><div class="no-trades">No trade history yet</div></div>
+      </section>
+
+      <section class="settings-panel">
+        <button class="settings-toggle" id="settingsToggle">&#x2699; Binance Testnet Settings</button>
+        <div class="settings-body hidden" id="settingsBody">
+          <label for="testnetApiKey">API Key</label>
+          <input type="text" id="testnetApiKey" placeholder="Enter your Binance Futures Testnet API key" autocomplete="off">
+          <label for="testnetSecretKey">Secret Key</label>
+          <input type="password" id="testnetSecretKey" placeholder="Enter your Binance Futures Testnet secret key" autocomplete="off">
+          <div class="settings-actions">
+            <button class="btn-icon" id="connectTestnetBtn">Connect</button>
+            <button class="btn-icon" id="disconnectTestnetBtn">Disconnect</button>
+          </div>
+          <div class="settings-status" id="testnetStatus"></div>
+          <div class="settings-info">
+            Get free testnet API keys at <a href="https://testnet.binancefuture.com/" target="_blank" rel="noopener">testnet.binancefuture.com</a>.<br>
+            Funds are virtual — no real money involved. Keys are stored locally in your browser.
+          </div>
+        </div>
       </section>
 
       <section class="hot-pairs-section" id="hotPairsSection">

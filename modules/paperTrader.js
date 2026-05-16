@@ -8,7 +8,15 @@ const STORAGE_KEY = 'crypto_paper_portfolio';
 export class PaperTrader {
   constructor(initialBalance = 10000) {
     this.initialBalance = initialBalance;
+    this.executor = null;
+    this.executionMode = 'local'; // 'local' or 'testnet'
+    this.lastOrderResults = [];
     this.load();
+  }
+
+  setExecutor(executor) {
+    this.executor = executor;
+    this.executionMode = executor && executor.connected ? 'testnet' : 'local';
   }
 
   load() {
@@ -80,7 +88,7 @@ export class PaperTrader {
     return Math.max(fixedQty, 0);
   }
 
-  executeSignal(signal) {
+  async executeSignal(signal) {
     if (signal.type === 'NO TRADE') return null;
     if (signal.confidence < 50) return null;
 
@@ -94,7 +102,7 @@ export class PaperTrader {
     return null;
   }
 
-  buy(symbol, price, signal = null) {
+  async buy(symbol, price, signal = null) {
     const qty = this.positionSize(price);
     if (qty <= 0 || this.cash <= 0) return null;
 
@@ -124,7 +132,7 @@ export class PaperTrader {
     }
 
     this.cash -= cost;
-    this.trades.push({
+    const trade = {
       type: 'BUY',
       symbol,
       price,
@@ -133,13 +141,26 @@ export class PaperTrader {
       pnl: null,
       confidence: signal?.confidence || 0,
       reasons: signal?.reasons || [],
-    });
+      orderId: null,
+    };
 
+    if (this.executor && this.executor.connected) {
+      try {
+        const orderResult = await this.executor.placeMarketOrder(symbol, 'BUY', qty);
+        trade.orderId = orderResult.orderId;
+        trade.executedPrice = orderResult.price;
+        this.lastOrderResults.push(orderResult);
+      } catch (err) {
+        trade.error = err.message;
+      }
+    }
+
+    this.trades.push(trade);
     this.save();
-    return { symbol, quantity: qty, price, cost };
+    return { symbol, quantity: qty, price, cost, trade };
   }
 
-  sell(symbol, price, signal = null) {
+  async sell(symbol, price, signal = null) {
     const position = this.positions[symbol];
     if (!position) return null;
 
@@ -150,7 +171,7 @@ export class PaperTrader {
     this.cash += proceeds;
     delete this.positions[symbol];
 
-    this.trades.push({
+    const trade = {
       type: 'SELL',
       symbol,
       price,
@@ -160,10 +181,23 @@ export class PaperTrader {
       pnlPercent: ((price - position.entryPrice) / position.entryPrice) * 100,
       confidence: signal?.confidence || 0,
       reasons: signal?.reasons || [],
-    });
+      orderId: null,
+    };
 
+    if (this.executor && this.executor.connected) {
+      try {
+        const orderResult = await this.executor.placeMarketOrder(symbol, 'SELL', qty);
+        trade.orderId = orderResult.orderId;
+        trade.executedPrice = orderResult.price;
+        this.lastOrderResults.push(orderResult);
+      } catch (err) {
+        trade.error = err.message;
+      }
+    }
+
+    this.trades.push(trade);
     this.save();
-    return { symbol, quantity: qty, price, proceeds, pnl };
+    return { symbol, quantity: qty, price, proceeds, pnl, trade };
   }
 
   updatePrices(prices) {
@@ -174,7 +208,7 @@ export class PaperTrader {
     }
   }
 
-  checkStopLosses(prices) {
+  async checkStopLosses(prices) {
     const toClose = [];
     for (const [symbol, pos] of Object.entries(this.positions)) {
       const currPrice = prices[symbol];
@@ -199,7 +233,7 @@ export class PaperTrader {
     }
 
     for (const close of toClose) {
-      this.sell(close.symbol, close.price);
+      await this.sell(close.symbol, close.price);
     }
 
     return toClose;
