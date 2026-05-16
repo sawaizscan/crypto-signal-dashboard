@@ -102,7 +102,7 @@ class App {
     this.ui.updateChart(this.candles, ind);
     this.ui.renderSignal(signal);
 
-    if (this.autoTrade && signal.type !== 'NO TRADE') {
+    if (this.autoTrade && signal.type !== 'NO TRADE' && !this.trader.positions[signal.pair]) {
       const priceMap = {};
       priceMap[signal.pair] = signal.entry;
       this.trader.updatePrices(priceMap);
@@ -145,7 +145,7 @@ class App {
 
     if (this.autoTrade) {
       for (const s of results.slice(0, 5)) {
-        if (s.type !== 'NO TRADE' && s.confidence >= 20) {
+        if (s.type !== 'NO TRADE' && s.confidence >= 15 && !this.trader.positions[s.pair]) {
           await this.trader.executeSignal(s);
         }
       }

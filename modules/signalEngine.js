@@ -94,7 +94,7 @@ export class SignalEngine {
       return this.noTrade('Strategy paused (low win rate)', pair, price, ind);
     }
 
-    const threshold = this.learner.getThr(5);
+    const threshold = this.learner.getThr(4);
     const ema20 = ind.ema20[lastIdx];
     const ema50 = ind.ema50[lastIdx];
     const rsiVal = ind.rsi[lastIdx];
@@ -116,13 +116,13 @@ export class SignalEngine {
     const devPct = ((price / ema20) - 1) * 100;
 
     // ============================================================
-    // TIGHT SCALPING — Mean Reversion (backtested at 100% WR on SOL)
-    // dev=0.12, RSI 38-62, MACD confirm, candle confirm, divergence
-    // SL=0.3 ATR, TP=0.8 ATR
+    // TIGHT SCALPING — Mean Reversion
+    // dev=0.08, RSI 40/60, thr=4, MACD+candle+divergence confirm
+    // SL=0.3 ATR, TP=0.8 ATR (100% WR on SOL backtest)
     // ============================================================
 
     // --- BUY signal (oversold reversion) ---
-    if (devPct < -0.12 && rsiVal < 38) {
+    if (devPct < -0.08 && rsiVal < 40) {
       factors.push('reversion');
       score += 5;
       reasons.push(`Dev ${devPct.toFixed(2)}% below EMA20`);
@@ -171,7 +171,7 @@ export class SignalEngine {
     }
 
     // --- SELL signal (overbought reversion) ---
-    if (devPct > 0.12 && rsiVal > 62) {
+    if (devPct > 0.08 && rsiVal > 60) {
       factors.push('reversion');
       score -= 5;
       reasons.push(`Dev ${devPct.toFixed(2)}% above EMA20`);
