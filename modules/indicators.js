@@ -195,6 +195,26 @@ export function classifyTrend(ema20, ema50, ema200) {
   return 'sideways';
 }
 
+export function calculateATR(candles, period = 14) {
+  const results = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i === 0) {
+      results.push(candles[i].high - candles[i].low);
+      continue;
+    }
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    if (i < period) {
+      results.push(results[i - 1] + (tr - results[i - 1]) / (i + 1));
+    } else {
+      results.push(results[i - 1] + (tr - results[i - 1]) / period);
+    }
+  }
+  return results;
+}
+
 export function computeAllIndicators(candles) {
   const closes = candles.map(c => c.close);
   const highs = candles.map(c => c.high);
@@ -213,11 +233,12 @@ export function computeAllIndicators(candles) {
   const pinBars = detectPinBar(candles);
   const trend = classifyTrend(ema20, ema50, ema200);
   const supportResistance = findSupportResistance(highs, lows);
+  const atr = calculateATR(candles);
 
   return {
     closes, highs, lows, volumes,
     rsi, ema20, ema50, ema200, macd,
     volumeSpikes, higherHighs, lowerLows,
-    breakouts, pinBars, trend, supportResistance,
+    breakouts, pinBars, trend, supportResistance, atr,
   };
 }

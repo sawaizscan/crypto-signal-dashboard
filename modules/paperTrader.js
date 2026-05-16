@@ -9,9 +9,14 @@ export class PaperTrader {
   constructor(initialBalance = 10000) {
     this.initialBalance = initialBalance;
     this.executor = null;
-    this.executionMode = 'local'; // 'local' or 'testnet'
+    this.executionMode = 'local';
     this.lastOrderResults = [];
+    this.signalEngineRef = null;
     this.load();
+  }
+
+  setSignalEngine(engine) {
+    this.signalEngineRef = engine;
   }
 
   setExecutor(executor) {
@@ -181,8 +186,13 @@ export class PaperTrader {
       pnlPercent: ((price - position.entryPrice) / position.entryPrice) * 100,
       confidence: signal?.confidence || 0,
       reasons: signal?.reasons || [],
+      factors: signal?.factors || [],
       orderId: null,
     };
+
+    if (this.signalEngineRef && signal && signal.factors) {
+      this.signalEngineRef.recordTradeOutcome(symbol, position.entryPrice, price, signal.factors);
+    }
 
     if (this.executor && this.executor.connected) {
       try {

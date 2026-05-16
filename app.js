@@ -19,6 +19,8 @@ class App {
     this.testnet = new BinanceTestnet();
     this.autoTrade = true;
 
+    this.trader.setSignalEngine(this.engine);
+
     this.currentSymbol = 'BTCUSDT';
     this.interval = '1m';
     this.allTickers = [];
