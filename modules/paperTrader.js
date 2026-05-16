@@ -1,6 +1,6 @@
 /**
- * PaperTrader — automated paper trading engine
- * Executes signals with virtual funds, tracks positions, P&L, and trade history
+ * PaperTrader — automated paper trading engine with leverage support
+ * Executes signals with virtual margin × leverage, tracks P&L
  */
 
 const STORAGE_KEY = 'crypto_paper_portfolio';
@@ -8,6 +8,8 @@ const STORAGE_KEY = 'crypto_paper_portfolio';
 export class PaperTrader {
   constructor(initialBalance = 10000) {
     this.initialBalance = initialBalance;
+    this.leverage = 10;
+    this.marginPerTrade = 0.50;
     this.executor = null;
     this.executionMode = 'local';
     this.lastOrderResults = [];
@@ -24,18 +26,31 @@ export class PaperTrader {
     this.executionMode = executor && executor.connected ? 'testnet' : 'local';
   }
 
+  async setLeverageOnTestnet(symbol) {
+    if (this.executor && this.executor.connected && this.executor.setLeverage) {
+      try {
+        await this.executor.setLeverage(symbol, this.leverage);
+      } catch (err) {
+        console.warn(`Failed to set leverage for ${symbol}:`, err.message);
+      }
+    }
+  }
+
   load() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
-      const data = JSON.parse(saved);
-      this.cash = data.cash;
-      this.positions = data.positions || {};
-      this.trades = data.trades || [];
-      this.initialBalance = data.initialBalance || this.initialBalance;
+      try {
+        const data = JSON.parse(saved);
+        this.cash = data.cash;
+        this.positions = data.positions || {};
+        this.trades = data.trades || [];
+        this.initialBalance = data.initialBalance || this.initialBalance;
+        this.leverage = data.leverage || this.leverage;
+      } catch {
+        this.reset();
+      }
     } else {
-      this.cash = this.initialBalance;
-      this.positions = {};
-      this.trades = [];
+      this.reset(true);
     }
   }
 
@@ -45,21 +60,24 @@ export class PaperTrader {
       positions: this.positions,
       trades: this.trades,
       initialBalance: this.initialBalance,
+      leverage: this.leverage,
     }));
   }
 
-  reset(balance = 10000) {
-    this.initialBalance = balance;
-    this.cash = balance;
+  reset(skipSave = false) {
+    this.cash = this.initialBalance;
     this.positions = {};
     this.trades = [];
-    this.save();
+    if (!skipSave) this.save();
   }
 
   get equity() {
     let posValue = 0;
     for (const sym of Object.keys(this.positions)) {
-      posValue += this.positions[sym].quantity * (this.positions[sym].currentPrice || this.positions[sym].entryPrice);
+      const p = this.positions[sym];
+      const currentVal = p.quantity * (p.currentPrice || p.entryPrice);
+      const pnl = currentVal - (p.margin * p.leverage);
+      posValue += p.margin + pnl;
     }
     return this.cash + posValue;
   }
@@ -86,19 +104,10 @@ export class PaperTrader {
     return (closed.filter(t => t.pnl > 0).length / closed.length) * 100;
   }
 
-  positionSize(price) {
-    const riskPerTrade = 0.33;
-    const maxAmount = this.cash * riskPerTrade;
-    const fixedQty = maxAmount / price;
-    return Math.max(fixedQty, 0);
-  }
-
   async executeSignal(signal) {
     if (signal.type === 'NO TRADE') return null;
-    if (signal.confidence < 20) return null;
-
+    if (signal.confidence < 15) return null;
     const price = signal.entry;
-
     if (signal.type === 'BUY') {
       return this.buy(signal.pair, price, signal);
     } else if (signal.type === 'SELL') {
@@ -108,44 +117,51 @@ export class PaperTrader {
   }
 
   async buy(symbol, price, signal = null) {
-    const qty = this.positionSize(price);
-    if (qty <= 0 || this.cash <= 0) return null;
+    if (this.cash <= 1) return null;
 
-    const cost = qty * price;
+    const margin = this.cash * this.marginPerTrade;
+    if (margin < 1) return null;
 
-    if (cost > this.cash) {
-      const affordableQty = (this.cash * 0.98) / price;
-      if (affordableQty <= 0) return null;
-      return this.buy(symbol, price, { ...signal, entry: price });
-    }
+    const positionValue = margin * this.leverage;
+    const qty = positionValue / price;
+    if (qty <= 0) return null;
+
+    this.cash -= margin;
 
     const existing = this.positions[symbol];
     if (existing) {
+      const totalMargin = existing.margin + margin;
       const totalQty = existing.quantity + qty;
-      const totalCost = existing.quantity * existing.entryPrice + cost;
       existing.quantity = totalQty;
-      existing.entryPrice = totalCost / totalQty;
+      existing.margin = totalMargin;
+      existing.entryPrice = (existing.entryPrice * existing.quantity + price * qty) / totalQty;
     } else {
       this.positions[symbol] = {
         quantity: qty,
         entryPrice: price,
         currentPrice: price,
+        margin,
+        leverage: this.leverage,
         stopLoss: signal?.stopLoss,
         tp1: signal?.tp1,
         tp2: signal?.tp2,
       };
     }
 
-    this.cash -= cost;
+    await this.setLeverageOnTestnet(symbol);
+
     const trade = {
       type: 'BUY',
       symbol,
       price,
       quantity: qty,
+      margin,
+      leverage: this.leverage,
       time: new Date().toISOString(),
       pnl: null,
       confidence: signal?.confidence || 0,
       reasons: signal?.reasons || [],
+      factors: signal?.factors || [],
       orderId: null,
     };
 
@@ -162,18 +178,18 @@ export class PaperTrader {
 
     this.trades.push(trade);
     this.save();
-    return { symbol, quantity: qty, price, cost, trade };
+    return { symbol, quantity: qty, price, margin, leverage: this.leverage };
   }
 
   async sell(symbol, price, signal = null) {
-    const position = this.positions[symbol];
-    if (!position) return null;
+    const pos = this.positions[symbol];
+    if (!pos) return null;
 
-    const qty = position.quantity;
-    const proceeds = qty * price;
-    const pnl = (price - position.entryPrice) * qty;
+    const qty = pos.quantity;
+    const pnl = (price - pos.entryPrice) * qty;
+    const grossReturn = pos.margin + pnl;
+    this.cash += grossReturn;
 
-    this.cash += proceeds;
     delete this.positions[symbol];
 
     const trade = {
@@ -181,9 +197,11 @@ export class PaperTrader {
       symbol,
       price,
       quantity: qty,
+      margin: pos.margin,
+      leverage: pos.leverage,
       time: new Date().toISOString(),
       pnl,
-      pnlPercent: ((price - position.entryPrice) / position.entryPrice) * 100,
+      pnlPercent: ((price - pos.entryPrice) / pos.entryPrice) * 100 * pos.leverage,
       confidence: signal?.confidence || 0,
       reasons: signal?.reasons || [],
       factors: signal?.factors || [],
@@ -191,7 +209,7 @@ export class PaperTrader {
     };
 
     if (this.signalEngineRef && signal && signal.factors) {
-      this.signalEngineRef.recordTradeOutcome(symbol, position.entryPrice, price, signal.factors);
+      this.signalEngineRef.recordTradeOutcome(symbol, pos.entryPrice, price, signal.factors);
     }
 
     if (this.executor && this.executor.connected) {
@@ -207,7 +225,7 @@ export class PaperTrader {
 
     this.trades.push(trade);
     this.save();
-    return { symbol, quantity: qty, price, proceeds, pnl, trade };
+    return { symbol, quantity: qty, price, pnl };
   }
 
   updatePrices(prices) {
@@ -245,7 +263,6 @@ export class PaperTrader {
     for (const close of toClose) {
       await this.sell(close.symbol, close.price);
     }
-
     return toClose;
   }
 }

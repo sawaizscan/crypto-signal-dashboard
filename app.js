@@ -140,7 +140,7 @@ class App {
 
     if (this.autoTrade) {
       for (const s of results.slice(0, 5)) {
-        if (s.type !== 'NO TRADE' && s.confidence >= 25) {
+        if (s.type !== 'NO TRADE' && s.confidence >= 15) {
           await this.trader.executeSignal(s);
         }
       }

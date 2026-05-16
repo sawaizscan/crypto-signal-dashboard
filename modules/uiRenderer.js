@@ -410,6 +410,10 @@ export class UIRenderer {
         <div class="stat-label">Win Rate</div>
         <div class="stat-value neutral">${portfolio.winRate.toFixed(0)}%</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-label">Leverage</div>
+        <div class="stat-value neutral">${portfolio.leverage}x</div>
+      </div>
     `;
   }
 
@@ -425,19 +429,19 @@ export class UIRenderer {
 
     el.innerHTML = `
       <div class="positions-header">
-        <span>Symbol</span><span>Qty</span><span>Entry</span><span>Current</span><span>P&amp;L</span><span>Return</span>
+        <span>Symbol</span><span>Qty</span><span>Entry</span><span>Lev</span><span>P&amp;L</span><span>Return</span>
       </div>
       ${syms.map(sym => {
         const pos = portfolio.positions[sym];
         const pnl = (pos.currentPrice - pos.entryPrice) * pos.quantity;
-        const pnlPct = ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
+        const pnlPct = ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * (pos.leverage || 1);
         const pnlCls = pnl >= 0 ? 'pos' : 'neg';
         const sign = pnl >= 0 ? '+' : '';
         return `<div class="position-row">
           <span class="sym">${sym.replace('USDT', '/USDT')}</span>
           <span>${pos.quantity.toFixed(4)}</span>
           <span>$${this.fmtPrice(pos.entryPrice)}</span>
-          <span>$${this.fmtPrice(pos.currentPrice)}</span>
+          <span>${pos.leverage || 1}x</span>
           <span class="${pnlCls}">${sign}$${this.fmtPriceShort(Math.abs(pnl))}</span>
           <span class="${pnlCls}">${sign}${pnlPct.toFixed(2)}%</span>
         </div>`;

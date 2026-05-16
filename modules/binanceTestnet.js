@@ -119,6 +119,14 @@ export class BinanceTestnet {
     };
   }
 
+  async setLeverage(symbol, leverage) {
+    if (!this.connected) throw new Error('Testnet not connected');
+    return this.signedRequest('POST', '/fapi/v1/leverage', {
+      symbol,
+      leverage,
+    });
+  }
+
   async fetchTestnetKlines(symbol, interval = '15m', limit = 100) {
     const url = `${TESTNET_BASE}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const resp = await fetch(url);

@@ -239,9 +239,10 @@ export class SignalEngine {
     }).length;
 
     // Dynamic threshold based on recent win rate
-    let threshold = 8;
-    if (this.winRate < 40 && this.wins + this.losses > 10) threshold = 14;
-    else if (this.winRate < 50 && this.wins + this.losses > 10) threshold = 10;
+    // Dynamic threshold based on recent win rate
+    let threshold = 6;
+    if (this.winRate < 35 && this.wins + this.losses > 15) threshold = 10;
+    else if (this.winRate < 45 && this.wins + this.losses > 15) threshold = 8;
 
     if (score >= threshold) signalType = 'BUY';
     else if (score <= -threshold) signalType = 'SELL';
@@ -254,7 +255,7 @@ export class SignalEngine {
       pair,
       time: new Date().toISOString(),
       type: signalType,
-      confidence: signalType !== 'NO TRADE' ? Math.max(25, confidence) : 0,
+      confidence: signalType !== 'NO TRADE' ? Math.max(18, confidence) : 0,
       score,
       entry: price,
       ...slData,
@@ -272,20 +273,20 @@ export class SignalEngine {
 
   calculateSLTP(ind, idx, signalType, price) {
     const atrVal = ind.atr ? ind.atr[ind.atr.length - 1] : null;
-    const atrMultiplier = atrVal && atrVal > 0 ? atrVal : price * 0.005;
+    const atrMultiplier = atrVal && atrVal > 0 ? atrVal : price * 0.004;
 
     if (signalType === 'BUY') {
-      const stopLoss = +(price - atrMultiplier * 1.5).toFixed(2);
+      const stopLoss = +(price - atrMultiplier * 0.8).toFixed(2);
       const risk = price - stopLoss;
-      const tp1 = +(price + risk * 1.8).toFixed(2);
-      const tp2 = +(price + risk * 3.5).toFixed(2);
+      const tp1 = +(price + risk * 1.2).toFixed(2);
+      const tp2 = +(price + risk * 2.5).toFixed(2);
       return { stopLoss, tp1, tp2 };
     }
     if (signalType === 'SELL') {
-      const stopLoss = +(price + atrMultiplier * 1.5).toFixed(2);
+      const stopLoss = +(price + atrMultiplier * 0.8).toFixed(2);
       const risk = stopLoss - price;
-      const tp1 = +(price - risk * 1.8).toFixed(2);
-      const tp2 = +(price - risk * 3.5).toFixed(2);
+      const tp1 = +(price - risk * 1.2).toFixed(2);
+      const tp2 = +(price - risk * 2.5).toFixed(2);
       return { stopLoss, tp1, tp2 };
     }
     return { stopLoss: null, tp1: null, tp2: null };
