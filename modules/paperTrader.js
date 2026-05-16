@@ -9,7 +9,7 @@ export class PaperTrader {
   constructor(initialBalance = 10000) {
     this.initialBalance = initialBalance;
     this.leverage = 10;
-    this.marginPerTrade = 0.50;
+    this.marginPerTrade = 0.70;
     this.executor = null;
     this.executionMode = 'local';
     this.lastOrderResults = [];

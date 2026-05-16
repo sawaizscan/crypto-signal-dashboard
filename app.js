@@ -196,7 +196,7 @@ class App {
 
   startRefreshLoop() {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
-    this.refreshTimer = setInterval(() => this.refreshData(), 10000);
+    this.refreshTimer = setInterval(() => this.refreshData(), 5000);
   }
 
   async changePair(symbol) {

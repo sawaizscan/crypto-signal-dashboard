@@ -1,6 +1,6 @@
 /**
- * SignalEngine — generates trading signals with adaptive learning
- * Tracks indicator performance and adjusts weights dynamically
+ * SignalEngine — HFT scalping engine with adaptive learning
+ * Generates high-frequency signals on 1m timeframe
  */
 
 import { computeAllIndicators } from './indicators.js';
@@ -9,20 +9,9 @@ const ADAPT_STORAGE_KEY = 'crypto_adaptive_weights';
 
 class AdaptiveWeights {
   constructor() {
-    this.weights = {
-      rsi: 15,
-      emaTrend: 20,
-      emaPosition: 8,
-      macd: 18,
-      volume: 12,
-      breakout: 15,
-      pinBar: 10,
-      momentum: 10,
-    };
+    this.weights = { momentum: 20, ema: 18, rsi: 16, macd: 14, pa: 12, volume: 10 };
     this.performance = {};
-    for (const k of Object.keys(this.weights)) {
-      this.performance[k] = { correct: 0, total: 0 };
-    }
+    for (const k of Object.keys(this.weights)) this.performance[k] = { correct: 0, total: 0 };
     this.load();
   }
 
@@ -39,42 +28,29 @@ class AdaptiveWeights {
 
   save() {
     try {
-      localStorage.setItem(ADAPT_STORAGE_KEY, JSON.stringify({
-        weights: this.weights,
-        performance: this.performance,
-      }));
+      localStorage.setItem(ADAPT_STORAGE_KEY, JSON.stringify({ weights: this.weights, performance: this.performance }));
     } catch {}
   }
 
   record(factors, won) {
-    for (const factor of factors) {
-      if (this.performance[factor]) {
-        this.performance[factor].total++;
-        if (won) this.performance[factor].correct++;
-      }
+    for (const f of factors) {
+      if (this.performance[f]) { this.performance[f].total++; if (won) this.performance[f].correct++; }
     }
     this.save();
   }
 
-  getAccuracy(factor) {
-    const p = this.performance[factor];
-    if (!p || p.total === 0) return 0.5;
-    return p.correct / p.total;
-  }
-
   getAdjustedWeights() {
-    const result = {};
+    const r = {};
     for (const [k, base] of Object.entries(this.weights)) {
-      const acc = this.getAccuracy(k);
-      result[k] = Math.max(2, Math.round(base * (0.3 + 1.4 * acc)));
+      const p = this.performance[k];
+      const acc = p && p.total > 0 ? p.correct / p.total : 0.5;
+      r[k] = Math.max(3, Math.round(base * (0.3 + 1.4 * acc)));
     }
-    return result;
+    return r;
   }
 
   reset() {
-    for (const k of Object.keys(this.weights)) {
-      this.performance[k] = { correct: 0, total: 0 };
-    }
+    for (const k of Object.keys(this.weights)) this.performance[k] = { correct: 0, total: 0 };
     this.save();
   }
 }
@@ -90,14 +66,13 @@ export class SignalEngine {
   }
 
   get winRate() {
-    const total = this.wins + this.losses;
-    return total > 0 ? (this.wins / total) * 100 : 0;
+    const t = this.wins + this.losses;
+    return t > 0 ? (this.wins / t) * 100 : 0;
   }
 
-  recordTradeOutcome(pair, entryPrice, exitPrice, factors) {
-    const won = (exitPrice > entryPrice);
-    if (won) this.wins++;
-    else this.losses++;
+  recordTradeOutcome(pair, entry, exit, factors) {
+    const won = exit > entry;
+    if (won) this.wins++; else this.losses++;
     this.recentOutcomes.push(won);
     if (this.recentOutcomes.length > 100) this.recentOutcomes.shift();
     this.adaptive.record(factors, won);
@@ -109,185 +84,126 @@ export class SignalEngine {
     const w = this.adaptive.getAdjustedWeights();
 
     let score = 0;
-    let reasons = [];
-    let factors = [];
-    let signalType = 'NO TRADE';
+    const reasons = [];
+    const factors = [];
 
-    // Volatility filter — skip if ATR is too low (choppy)
-    const atrVal = ind.atr ? ind.atr[ind.atr.length - 1] : null;
-    if (atrVal && atrVal < price * 0.001) {
-      return {
-        pair, time: new Date().toISOString(), type: 'NO TRADE',
-        confidence: 0, score: 0, entry: price,
-        stopLoss: null, tp1: null, tp2: null,
-        reasons: ['Market too quiet (low volatility)'],
-        trend: ind.trend,
-      };
-    }
+    // ---- MOMENTUM (strongest weight) ----
+    // Compare last 2 completed candles
+    if (lastIdx >= 2) {
+      const c1 = candles[lastIdx];     // current forming
+      const c2 = candles[lastIdx - 1]; // last complete
+      const c3 = candles[lastIdx - 2]; // prior
 
-    // RSI
-    const rsiVal = ind.rsi[ind.rsi.length - 1];
-    if (rsiVal !== null) {
-      if (rsiVal < 35) {
-        score += w.rsi; reasons.push(`RSI ${rsiVal.toFixed(0)} oversold`); factors.push('rsi');
-      } else if (rsiVal > 65) {
-        score -= w.rsi; reasons.push(`RSI ${rsiVal.toFixed(0)} overbought`); factors.push('rsi');
-      } else if (rsiVal < 45) {
-        score += Math.round(w.rsi * 0.4); reasons.push('RSI bullish bias'); factors.push('rsi');
-      } else if (rsiVal > 55) {
-        score -= Math.round(w.rsi * 0.4); reasons.push('RSI bearish bias'); factors.push('rsi');
-      }
+      const c2Bull = c2.close > c2.open;
+      const c3Bull = c3.close > c3.open;
+      const priceUp2 = c2.close > c3.close;
+
+      // Consecutive bullish candles
+      if (c2Bull && c3Bull) { score += Math.round(w.momentum * 0.6); reasons.push('2 green candles'); factors.push('momentum'); }
+      else if (!c2Bull && !c3Bull) { score -= Math.round(w.momentum * 0.6); reasons.push('2 red candles'); factors.push('momentum'); }
+
+      // Price rising over last 2 candles
+      if (priceUp2) { score += Math.round(w.momentum * 0.4); reasons.push('Price rising'); factors.push('momentum'); }
+      else { score -= Math.round(w.momentum * 0.4); reasons.push('Price falling'); factors.push('momentum'); }
+
+      // Current candle direction (early signal)
+      if (c1.close > c1.open && c2Bull) { score += Math.round(w.momentum * 0.3); }
+      else if (c1.close < c1.open && !c2Bull) { score -= Math.round(w.momentum * 0.3); }
     }
 
-    // EMA trend alignment
-    switch (ind.trend) {
-      case 'bullish':
-        score += w.emaTrend; reasons.push('EMA uptrend'); factors.push('emaTrend');
-        break;
-      case 'bearish':
-        score -= w.emaTrend; reasons.push('EMA downtrend'); factors.push('emaTrend');
-        break;
+    // ---- EMA POSITION ----
+    const ema20 = ind.ema20[lastIdx];
+    if (ema20 !== null) {
+      if (price > ema20 * 1.0005) { score += Math.round(w.ema * 0.5); reasons.push('Above EMA20'); factors.push('ema'); }
+      else if (price < ema20 * 0.9995) { score -= Math.round(w.ema * 0.5); reasons.push('Below EMA20'); factors.push('ema'); }
     }
 
-    // Price vs EMAs
-    const ema20v = ind.ema20[lastIdx];
-    const ema50v = ind.ema50[lastIdx];
-    let emaScore = 0;
-    if (ema20v !== null) {
-      if (price > ema20v) emaScore += 1; else emaScore -= 1;
-    }
-    if (ema50v !== null) {
-      if (price > ema50v) emaScore += 1; else emaScore -= 1;
-    }
-    if (emaScore !== 0) {
-      const contrib = Math.round(w.emaPosition * (emaScore / 2));
-      score += contrib;
-      if (contrib > 0) { reasons.push('Price above key EMAs'); factors.push('emaPosition'); }
-      else if (contrib < 0) { reasons.push('Price below key EMAs'); factors.push('emaPosition'); }
+    // Price vs previous close (immediate momentum)
+    if (lastIdx >= 1) {
+      const prevClose = ind.closes[lastIdx - 1];
+      if (price > prevClose) { score += Math.round(w.ema * 0.3); reasons.push('Up tick'); }
+      else { score -= Math.round(w.ema * 0.3); reasons.push('Down tick'); }
     }
 
-    // MACD
+    // ---- RSI ----
+    const rsi = ind.rsi[lastIdx];
+    if (rsi !== null) {
+      if (rsi > 55 && rsi < 75) { score += Math.round(w.rsi * 0.5); reasons.push(`RSI ${rsi.toFixed(0)}`); factors.push('rsi'); }
+      else if (rsi < 45 && rsi > 25) { score -= Math.round(w.rsi * 0.5); reasons.push(`RSI ${rsi.toFixed(0)}`); factors.push('rsi'); }
+      else if (rsi >= 75) { score -= Math.round(w.rsi * 0.3); reasons.push('RSI overbought'); factors.push('rsi'); }
+      else if (rsi <= 25) { score += Math.round(w.rsi * 0.3); reasons.push('RSI oversold'); factors.push('rsi'); }
+    }
+
+    // ---- MACD ----
     const hist = ind.macd.histogram;
-    const macdLine = ind.macd.macdLine;
-    const signalLine = ind.macd.signalLine;
-    let macdScore = 0;
     if (hist.length >= 3) {
-      const h0 = hist[hist.length - 1];
-      const h1 = hist[hist.length - 2];
-      const h2 = hist[hist.length - 3];
-      const m0 = macdLine[macdLine.length - 1];
-      const s0 = signalLine[signalLine.length - 1];
-
-      if (h0 !== null && h0 > 0) macdScore += 1;
-      else if (h0 !== null) macdScore -= 1;
-
-      if (h0 !== null && h1 !== null && h0 > h1) macdScore += 1;
-      else if (h0 !== null && h1 !== null) macdScore -= 1;
-
-      if (m0 !== null && s0 !== null && m0 > s0) macdScore += 1;
-      else if (m0 !== null && s0 !== null) macdScore -= 1;
-
-      if (h0 !== null && h1 !== null && h2 !== null && h0 > h1 && h1 > h2) macdScore += 1;
-
-      if (macdScore !== 0) {
-        const contrib = Math.round(w.macd * (macdScore / 4));
-        score += contrib;
-        if (contrib > 0) { reasons.push('MACD bullish'); factors.push('macd'); }
-        else if (contrib < 0) { reasons.push('MACD bearish'); factors.push('macd'); }
-      }
+      const h0 = hist[lastIdx]; const h1 = hist[lastIdx - 1];
+      if (h0 !== null && h1 !== null && h0 > h1 && h0 > 0) { score += Math.round(w.macd * 0.5); reasons.push('MACD +'); factors.push('macd'); }
+      else if (h0 !== null && h1 !== null && h0 < h1 && h0 < 0) { score -= Math.round(w.macd * 0.5); reasons.push('MACD -'); factors.push('macd'); }
     }
 
-    // Volume spike
-    if (ind.volumeSpikes[lastIdx]) {
-      score += w.volume; reasons.push('Volume spike'); factors.push('volume');
-    }
-
-    // Breakout
+    // ---- PRICE ACTION ----
     const bo = ind.breakouts[lastIdx];
-    if (bo.direction === 'bullish') {
-      score += w.breakout; reasons.push('Bullish breakout'); factors.push('breakout');
-    } else if (bo.direction === 'bearish') {
-      score -= w.breakout; reasons.push('Bearish breakout'); factors.push('breakout');
-    }
+    if (bo.direction === 'bullish') { score += Math.round(w.pa * 0.6); reasons.push('Breakout up'); factors.push('pa'); }
+    else if (bo.direction === 'bearish') { score -= Math.round(w.pa * 0.6); reasons.push('Breakout dn'); factors.push('pa'); }
 
-    // Pin bar
     const pb = ind.pinBars[lastIdx];
-    if (pb.isPinBar && pb.direction === 'bullish') {
-      score += w.pinBar; reasons.push('Bullish rejection'); factors.push('pinBar');
-    } else if (pb.isPinBar && pb.direction === 'bearish') {
-      score -= w.pinBar; reasons.push('Bearish rejection'); factors.push('pinBar');
-    }
+    if (pb.isPinBar && pb.direction === 'bullish') { score += Math.round(w.pa * 0.5); reasons.push('Pin buy'); factors.push('pa'); }
+    else if (pb.isPinBar && pb.direction === 'bearish') { score -= Math.round(w.pa * 0.5); reasons.push('Pin sell'); factors.push('pa'); }
 
-    // Momentum (HH/LL)
-    if (ind.higherHighs[lastIdx]) {
-      score += Math.round(w.momentum * 0.4); reasons.push('Higher high'); factors.push('momentum');
-    }
-    if (ind.lowerLows[lastIdx]) {
-      score -= Math.round(w.momentum * 0.4); reasons.push('Lower low'); factors.push('momentum');
-    }
+    if (ind.higherHighs[lastIdx]) { score += Math.round(w.pa * 0.3); factors.push('pa'); }
+    if (ind.lowerLows[lastIdx]) { score -= Math.round(w.pa * 0.3); factors.push('pa'); }
 
-    // Minimum confirmation check — need at least 2 bullish or bearish factors
-    const bullCount = factors.filter(f => {
-      const val = this.adaptive.weights[f] || 0;
-      const idx = Object.keys(this.adaptive.weights).indexOf(f);
-      return score > 0;
-    }).length;
+    // ---- VOLUME ----
+    if (ind.volumeSpikes[lastIdx]) { score += Math.round(w.volume * 0.6); reasons.push('Vol spike'); factors.push('volume'); }
 
-    const bearCount = factors.filter(f => {
-      const idx = Object.keys(this.adaptive.weights).indexOf(f);
-      return score < 0;
-    }).length;
+    // ---- CLASSIFY ----
+    // Ultra-low threshold: trade on any slight edge
+    let threshold = 3;
+    // Tighten if win rate is very low
+    if (this.winRate < 30 && this.wins + this.losses > 20) threshold = 6;
+    else if (this.winRate < 40 && this.wins + this.losses > 20) threshold = 4;
 
-    // Dynamic threshold based on recent win rate
-    // Dynamic threshold based on recent win rate
-    let threshold = 6;
-    if (this.winRate < 35 && this.wins + this.losses > 15) threshold = 10;
-    else if (this.winRate < 45 && this.wins + this.losses > 15) threshold = 8;
-
+    let signalType = 'NO TRADE';
     if (score >= threshold) signalType = 'BUY';
     else if (score <= -threshold) signalType = 'SELL';
 
-    const confidence = Math.min(Math.abs(score), 95);
+    const confidence = Math.min(Math.abs(score) + 10, 90);
 
-    const slData = this.calculateSLTP(ind, lastIdx, signalType, price);
+    // ---- SL/TP: tight scalps for 10x leverage ----
+    const slData = this.calcScalpSLTP(ind, lastIdx, signalType, price);
 
     const signal = {
-      pair,
-      time: new Date().toISOString(),
-      type: signalType,
-      confidence: signalType !== 'NO TRADE' ? Math.max(18, confidence) : 0,
-      score,
-      entry: price,
-      ...slData,
-      reasons: reasons.slice(0, 5),
-      factors,
-      trend: ind.trend,
-      winRate: this.winRate.toFixed(0) + '%',
+      pair, time: new Date().toISOString(), type: signalType,
+      confidence: signalType !== 'NO TRADE' ? Math.max(20, confidence) : 0,
+      score, entry: price, ...slData,
+      reasons: reasons.slice(0, 4), factors,
+      trend: ind.trend, winRate: this.winRate.toFixed(0) + '%',
     };
 
     this.signalHistory.push(signal);
     if (this.signalHistory.length > 500) this.signalHistory.shift();
-
     return signal;
   }
 
-  calculateSLTP(ind, idx, signalType, price) {
-    const atrVal = ind.atr ? ind.atr[ind.atr.length - 1] : null;
-    const atrMultiplier = atrVal && atrVal > 0 ? atrVal : price * 0.004;
+  calcScalpSLTP(ind, idx, type, price) {
+    // For 10x leverage, very tight stops
+    const atr = ind.atr ? ind.atr[ind.atr.length - 1] : null;
+    const tick = Math.max(atr || price * 0.002, price * 0.0008);
 
-    if (signalType === 'BUY') {
-      const stopLoss = +(price - atrMultiplier * 0.8).toFixed(2);
-      const risk = price - stopLoss;
-      const tp1 = +(price + risk * 1.2).toFixed(2);
-      const tp2 = +(price + risk * 2.5).toFixed(2);
-      return { stopLoss, tp1, tp2 };
+    if (type === 'BUY') {
+      const sl = +(price - tick * 0.6).toFixed(2);
+      const risk = price - sl;
+      const tp1 = +(price + risk * 1.5).toFixed(2);
+      const tp2 = +(price + risk * 3).toFixed(2);
+      return { stopLoss: sl, tp1, tp2 };
     }
-    if (signalType === 'SELL') {
-      const stopLoss = +(price + atrMultiplier * 0.8).toFixed(2);
-      const risk = stopLoss - price;
-      const tp1 = +(price - risk * 1.2).toFixed(2);
-      const tp2 = +(price - risk * 2.5).toFixed(2);
-      return { stopLoss, tp1, tp2 };
+    if (type === 'SELL') {
+      const sl = +(price + tick * 0.6).toFixed(2);
+      const risk = sl - price;
+      const tp1 = +(price - risk * 1.5).toFixed(2);
+      const tp2 = +(price - risk * 3).toFixed(2);
+      return { stopLoss: sl, tp1, tp2 };
     }
     return { stopLoss: null, tp1: null, tp2: null };
   }
@@ -298,27 +214,12 @@ export class SignalEngine {
     return prev && prev !== signal.type;
   }
 
-  rankPairs(pairsData) {
-    return pairsData.sort((a, b) => {
+  rankPairs(data) {
+    return data.sort((a, b) => {
       const vol = Math.log(b.volume + 1) - Math.log(a.volume + 1);
       const vola = Math.abs(b.change) - Math.abs(a.change);
       return vol * 0.6 + vola * 0.4;
     });
-  }
-
-  getAdaptiveInfo() {
-    const w = this.adaptive.getAdjustedWeights();
-    const info = {};
-    for (const [k, v] of Object.entries(this.adaptive.weights)) {
-      const p = this.adaptive.performance[k];
-      info[k] = {
-        baseWeight: v,
-        adjustedWeight: w[k],
-        accuracy: p.total > 0 ? ((p.correct / p.total) * 100).toFixed(0) + '%' : '—',
-        samples: p.total,
-      };
-    }
-    return info;
   }
 
   runBacktest(candles) {
@@ -328,20 +229,17 @@ export class SignalEngine {
       const ind = computeAllIndicators(slice);
       const signal = this.generateSignal('BACKTEST', slice, ind);
       if (signal.type !== 'NO TRADE') {
-        const nextCandles = candles.slice(i + 1, i + 6);
-        if (nextCandles.length > 0) {
+        const next = candles.slice(i + 1, i + 4);
+        if (next.length > 0) {
           let outcome = null;
           if (signal.type === 'BUY') {
-            const maxHigh = Math.max(...nextCandles.map(c => c.high));
-            outcome = maxHigh >= signal.tp1 ? 'win' : maxHigh < signal.entry ? 'loss' : 'pending';
+            const mh = Math.max(...next.map(c => c.high));
+            outcome = mh >= signal.tp1 ? 'win' : mh < signal.entry ? 'loss' : 'pending';
           } else {
-            const minLow = Math.min(...nextCandles.map(c => c.low));
-            outcome = minLow <= signal.tp1 ? 'win' : minLow > signal.entry ? 'loss' : 'pending';
+            const ml = Math.min(...next.map(c => c.low));
+            outcome = ml <= signal.tp1 ? 'win' : ml > signal.entry ? 'loss' : 'pending';
           }
-          results.push({
-            index: i, type: signal.type, entry: signal.entry,
-            tp1: signal.tp1, sl: signal.stopLoss, outcome, confidence: signal.confidence,
-          });
+          results.push({ index: i, type: signal.type, entry: signal.entry, tp1: signal.tp1, sl: signal.stopLoss, outcome, confidence: signal.confidence });
         }
       }
     }
@@ -350,6 +248,5 @@ export class SignalEngine {
 }
 
 export function resetAdaptiveWeights() {
-  const eng = new SignalEngine();
-  eng.adaptive.reset();
+  new SignalEngine().adaptive.reset();
 }
