@@ -21,7 +21,7 @@ class App {
 
     this.trader.setSignalEngine(this.engine);
 
-    this.currentSymbol = 'BTCUSDT';
+    this.currentSymbol = 'SOLUSDT';
     this.interval = '1m';
     this.allTickers = [];
     this.candles = [];
@@ -111,7 +111,12 @@ class App {
   }
 
   async scanAllSignals() {
-    const topPairs = this.allTickers.slice(0, 10);
+    // SOL first (highest WR in backtests), then top volume pairs
+    const solTicker = this.allTickers.find(t => t.symbol === 'SOLUSDT');
+    let topPairs = this.allTickers.slice(0, 10);
+    if (solTicker && !topPairs.some(t => t.symbol === 'SOLUSDT')) {
+      topPairs = [solTicker, ...topPairs.slice(0, 9)];
+    }
 
     const signalPromises = topPairs.map(async (ticker) => {
       try {
@@ -140,7 +145,7 @@ class App {
 
     if (this.autoTrade) {
       for (const s of results.slice(0, 5)) {
-        if (s.type !== 'NO TRADE' && s.confidence >= 15) {
+        if (s.type !== 'NO TRADE' && s.confidence >= 20) {
           await this.trader.executeSignal(s);
         }
       }

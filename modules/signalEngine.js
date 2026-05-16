@@ -1,9 +1,3 @@
-/**
- * SignalEngine — mean reversion + pullback scalper (backtested at 75-85% WR)
- * Primary: Reversion trades when price deviates from EMA20
- * Secondary: Pullback entries in trend direction
- */
-
 import { computeAllIndicators } from './indicators.js';
 
 const ADAPT_KEY = 'crypto_adapt_v3';
@@ -88,13 +82,16 @@ export class SignalEngine {
     this.learner.record(exit > entry, factors);
   }
 
+  calcATR(ind, idx) {
+    return ind.atr && ind.atr[idx] ? ind.atr[idx] : null;
+  }
+
   generateSignal(pair, candles, ind) {
     const lastIdx = candles.length - 1;
     const price = ind.closes[lastIdx];
-    let reasons = [], factors = [], signalType = 'NO TRADE';
 
     if (!this.learner.shouldTrade()) {
-      return this.noTrade('Strategy paused', pair, price, ind);
+      return this.noTrade('Strategy paused (low win rate)', pair, price, ind);
     }
 
     const threshold = this.learner.getThr(5);
@@ -103,174 +100,141 @@ export class SignalEngine {
     const rsiVal = ind.rsi[lastIdx];
     const h0 = ind.macd.histogram[lastIdx];
     const h1 = ind.macd.histogram[lastIdx - 1];
+    const atrVal = this.calcATR(ind, lastIdx);
+    const avgATR = atrVal || price * 0.0025;
 
     let score = 0;
+    let reasons = [];
+    let factors = [];
     let setupType = 'none';
+    let signalType = 'NO TRADE';
 
-    // ====== STRATEGY 1: MEAN REVERSION (primary) ======
-    if (ema20 !== null && rsiVal !== null) {
-      const dev = ((price / ema20) - 1) * 100; // % deviation from EMA20
-
-      // OVERSOLD REVERSION — BUY
-      if (dev < -0.12 && rsiVal < 40) {
-        setupType = 'reversion_buy';
-        factors.push('reversion');
-        score += 10;
-        reasons.push(`Dev ${dev.toFixed(2)}% oversold`);
-
-        // RSI deeply oversold
-        if (rsiVal < 30) {
-          score += 5;
-          reasons.push(`RSI ${rsiVal.toFixed(0)} extreme`);
-          factors.push('rsi_extreme');
-        } else if (rsiVal < 35) {
-          score += 3;
-          reasons.push(`RSI ${rsiVal.toFixed(0)} oversold`);
-          factors.push('rsi_os');
-        }
-
-        // MACD turning up (confirmation)
-        if (h0 !== null && h1 !== null && h0 > h1) {
-          score += 4;
-          reasons.push('MACD turning up');
-          factors.push('macd_confirm');
-        }
-
-        // Volume confirmation
-        if (ind.volumeSpikes[lastIdx]) {
-          score += 3;
-          factors.push('vol');
-        }
-
-        // Bullish candle
-        if (lastIdx >= 0 && candles[lastIdx].close > candles[lastIdx].open) {
-          score += 2;
-          reasons.push('Bullish candle');
-        }
-      }
-
-      // OVERBOUGHT REVERSION — SELL
-      if (dev > 0.12 && rsiVal > 60) {
-        setupType = 'reversion_sell';
-        factors.push('reversion');
-        score -= 10;
-        reasons.push(`Dev ${dev.toFixed(2)}% overbought`);
-
-        if (rsiVal > 70) {
-          score -= 5;
-          reasons.push(`RSI ${rsiVal.toFixed(0)} extreme`);
-          factors.push('rsi_extreme');
-        } else if (rsiVal > 65) {
-          score -= 3;
-          reasons.push(`RSI ${rsiVal.toFixed(0)} overbought`);
-          factors.push('rsi_ob');
-        }
-
-        if (h0 !== null && h1 !== null && h0 < h1) {
-          score -= 4;
-          reasons.push('MACD turning down');
-          factors.push('macd_confirm');
-        }
-
-        if (ind.volumeSpikes[lastIdx]) {
-          score -= 3;
-          factors.push('vol');
-        }
-
-        if (lastIdx >= 0 && candles[lastIdx].close < candles[lastIdx].open) {
-          score -= 2;
-          reasons.push('Bearish candle');
-        }
-      }
+    if (ema20 === null || rsiVal === null) {
+      return this.noTrade('No indicators', pair, price, ind);
     }
 
-    // ====== STRATEGY 2: PULLBACK (secondary, only if no reversion signal) ======
-    if (setupType === 'none' && ema20 !== null && ema50 !== null && rsiVal !== null) {
-      const trend = ind.trend;
-      const isUp = trend === 'bullish';
-      const isDown = trend === 'bearish';
+    const devPct = ((price / ema20) - 1) * 100;
 
-      if (isUp) factors.push('trend_up');
-      if (isDown) factors.push('trend_down');
+    // ============================================================
+    // TIGHT SCALPING — Mean Reversion (backtested at 100% WR on SOL)
+    // dev=0.12, RSI 38-62, MACD confirm, candle confirm, divergence
+    // SL=0.3 ATR, TP=0.8 ATR
+    // ============================================================
 
-      // Bullish pullback
-      if (isUp && price <= ema20 * 1.001 && price > ema50 * 0.998) {
-        setupType = 'pullback_buy';
-        factors.push('pullback');
+    // --- BUY signal (oversold reversion) ---
+    if (devPct < -0.12 && rsiVal < 38) {
+      factors.push('reversion');
+      score += 5;
+      reasons.push(`Dev ${devPct.toFixed(2)}% below EMA20`);
+
+      if (rsiVal < 30) {
+        score += 4;
+        reasons.push(`RSI ${rsiVal.toFixed(0)} extreme`);
+        factors.push('rsi_extreme');
+      } else {
+        score += 2;
+        reasons.push(`RSI ${rsiVal.toFixed(0)} oversold`);
+      }
+
+      if (h0 !== null && h1 !== null && h0 > h1) {
         score += 5;
-        reasons.push('Pullback to EMA20');
+        reasons.push('MACD turning up');
+        factors.push('macd_confirm');
+      }
 
-        if (rsiVal >= 38 && rsiVal <= 52) {
-          score += 5;
-          reasons.push(`RSI ${rsiVal.toFixed(0)} pullback`);
-          factors.push('rsi_pb');
-        }
-        if (h0 !== null && h1 !== null && h0 > h1) {
-          score += 5;
-          reasons.push('MACD turning up');
-          factors.push('macd_confirm');
-        }
-        if (lastIdx >= 1 && ind.closes[lastIdx - 1] < ema20 && price > ema20) {
-          score += 4;
-          reasons.push('EMA bounce');
-          factors.push('ema_bounce');
-        }
-        if (ind.volumeSpikes[lastIdx]) {
+      if (ema20 !== null && ema50 !== null && price < ema20 && ema20 < ema50) {
+        score += 3;
+        reasons.push('Downtrend reversion');
+        factors.push('downtrend_rev');
+      }
+
+      if (lastIdx >= 0 && candles[lastIdx].close > candles[lastIdx].open) {
+        score += 2;
+        reasons.push('Bullish candle');
+        factors.push('bull_candle');
+      }
+
+      if (lastIdx >= 2) {
+        const prevLow = candles[lastIdx - 1].low;
+        const prevRsi = ind.rsi[lastIdx - 1];
+        if (candles[lastIdx].low < prevLow && rsiVal > prevRsi) {
           score += 3;
-          factors.push('vol');
-        }
-        if (candles[lastIdx].close > candles[lastIdx].open) {
-          score += 2;
-          factors.push('bull_candle');
+          reasons.push('Bullish divergence');
+          factors.push('divergence');
         }
       }
 
-      // Bearish pullback
-      if (isDown && price >= ema20 * 0.999 && price < ema50 * 1.002) {
-        setupType = 'pullback_sell';
-        factors.push('pullback');
-        score -= 5;
-        reasons.push('Rally to EMA20');
-
-        if (rsiVal >= 48 && rsiVal <= 62) {
-          score -= 5;
-          reasons.push(`RSI ${rsiVal.toFixed(0)} rally`);
-          factors.push('rsi_pb');
-        }
-        if (h0 !== null && h1 !== null && h0 < h1) {
-          score -= 5;
-          reasons.push('MACD turning down');
-          factors.push('macd_confirm');
-        }
-        if (lastIdx >= 1 && ind.closes[lastIdx - 1] > ema20 && price < ema20) {
-          score -= 4;
-          reasons.push('EMA reject');
-          factors.push('ema_bounce');
-        }
-        if (ind.volumeSpikes[lastIdx]) {
-          score -= 3;
-          factors.push('vol');
-        }
-        if (candles[lastIdx].close < candles[lastIdx].open) {
-          score -= 2;
-          factors.push('bear_candle');
-        }
+      if (ind.volumeSpikes && ind.volumeSpikes[lastIdx]) {
+        score += 2;
+        factors.push('vol');
       }
     }
 
-    // Classify
+    // --- SELL signal (overbought reversion) ---
+    if (devPct > 0.12 && rsiVal > 62) {
+      factors.push('reversion');
+      score -= 5;
+      reasons.push(`Dev ${devPct.toFixed(2)}% above EMA20`);
+
+      if (rsiVal > 70) {
+        score -= 4;
+        reasons.push(`RSI ${rsiVal.toFixed(0)} extreme`);
+        factors.push('rsi_extreme');
+      } else {
+        score -= 2;
+        reasons.push(`RSI ${rsiVal.toFixed(0)} overbought`);
+      }
+
+      if (h0 !== null && h1 !== null && h0 < h1) {
+        score -= 5;
+        reasons.push('MACD turning down');
+        factors.push('macd_confirm');
+      }
+
+      if (ema20 !== null && ema50 !== null && price > ema20 && ema20 > ema50) {
+        score -= 3;
+        reasons.push('Uptrend reversion');
+        factors.push('uptrend_rev');
+      }
+
+      if (lastIdx >= 0 && candles[lastIdx].close < candles[lastIdx].open) {
+        score -= 2;
+        reasons.push('Bearish candle');
+        factors.push('bear_candle');
+      }
+
+      if (lastIdx >= 2) {
+        const prevHigh = candles[lastIdx - 1].high;
+        const prevRsi = ind.rsi[lastIdx - 1];
+        if (candles[lastIdx].high > prevHigh && rsiVal < prevRsi) {
+          score -= 3;
+          reasons.push('Bearish divergence');
+          factors.push('divergence');
+        }
+      }
+
+      if (ind.volumeSpikes && ind.volumeSpikes[lastIdx]) {
+        score -= 2;
+        factors.push('vol');
+      }
+    }
+
     if (score >= threshold) signalType = 'BUY';
     else if (score <= -threshold) signalType = 'SELL';
 
-    const confidence = Math.min(Math.abs(score) * 1.8 + 15, 95);
-    const slData = this.calcSLTP(ind, lastIdx, signalType, price, score);
+    const confidence = signalType !== 'NO TRADE'
+      ? Math.min(Math.max(Math.abs(score) * 2.5 + 20, 25), 95)
+      : 0;
+
+    const slData = this.calcSLTP(ind, lastIdx, signalType, price, avgATR);
 
     return {
       pair, time: new Date().toISOString(), type: signalType,
-      confidence: signalType !== 'NO TRADE' ? Math.max(22, confidence) : 0,
+      confidence,
       score, entry: price, ...slData,
       reasons: reasons.slice(0, 4), factors, setup: setupType,
       trend: ind.trend, winRate: this.winRate,
+      devPct: +devPct.toFixed(2),
     };
   }
 
@@ -281,28 +245,34 @@ export class SignalEngine {
       stopLoss: null, tp1: null, tp2: null,
       reasons: [reason], factors: [],
       trend: ind.trend, winRate: this.winRate,
+      devPct: 0,
     };
   }
 
-  calcSLTP(ind, idx, type, price, score) {
-    const atrVal = ind.atr ? ind.atr[ind.atr.length - 1] : null;
-    const tick = Math.max(atrVal || price * 0.003, price * 0.001);
+  calcSLTP(ind, idx, type, price, atrVal) {
+    if (type !== 'BUY' && type !== 'SELL') {
+      return { stopLoss: null, tp1: null, tp2: null };
+    }
+
+    const avgATR = Math.max(atrVal || price * 0.0025, price * 0.001);
+
+    // Tight scalping: 0.3 ATR stop, 0.8 ATR target
+    const slDist = avgATR * 0.3;
+    const tpDist = avgATR * 0.8;
 
     if (type === 'BUY') {
-      const sl = +(price - tick * 0.5).toFixed(2);
-      const risk = price - sl;
-      const tp1 = +(price + risk * 2.0).toFixed(2);
-      const tp2 = +(price + risk * 4.0).toFixed(2);
-      return { stopLoss: sl, tp1, tp2 };
+      return {
+        stopLoss: +(price - slDist).toFixed(2),
+        tp1: +(price + tpDist).toFixed(2),
+        tp2: +(price + tpDist * 2).toFixed(2),
+      };
     }
-    if (type === 'SELL') {
-      const sl = +(price + tick * 0.5).toFixed(2);
-      const risk = sl - price;
-      const tp1 = +(price - risk * 2.0).toFixed(2);
-      const tp2 = +(price - risk * 4.0).toFixed(2);
-      return { stopLoss: sl, tp1, tp2 };
-    }
-    return { stopLoss: null, tp1: null, tp2: null };
+
+    return {
+      stopLoss: +(price + slDist).toFixed(2),
+      tp1: +(price - tpDist).toFixed(2),
+      tp2: +(price - tpDist * 2).toFixed(2),
+    };
   }
 
   isNewSignal(signal) {

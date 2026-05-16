@@ -198,11 +198,12 @@ export class UIRenderer {
       </div>
       <div class="signal-details">
         ${signal.entry ? `<div><span class="label">Entry:</span> $${this.fmtPrice(signal.entry)}</div>` : ''}
+        ${signal.devPct ? `<div><span class="label">Dev:</span> ${signal.devPct > 0 ? '+' : ''}${signal.devPct}%</div>` : ''}
         ${signal.stopLoss ? `<div><span class="label">SL:</span> $${this.fmtPrice(signal.stopLoss)}</div>` : ''}
         ${signal.tp1 ? `<div><span class="label">TP1:</span> $${this.fmtPrice(signal.tp1)}</div>` : ''}
         ${signal.tp2 ? `<div><span class="label">TP2:</span> $${this.fmtPrice(signal.tp2)}</div>` : ''}
         ${signal.trend ? `<div><span class="label">Trend:</span> ${signal.trend}</div>` : ''}
-        ${signal.winRate ? `<div><span class="label">Bot Win Rate:</span> ${signal.winRate}</div>` : ''}
+        ${signal.winRate ? `<div><span class="label">Bot WR:</span> ${signal.winRate}</div>` : ''}
       </div>
       <div class="signal-reasons">
         ${signal.reasons.map(r => `<span class="reason-tag">${r}</span>`).join('')}
