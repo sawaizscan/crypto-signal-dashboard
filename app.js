@@ -26,8 +26,8 @@ class App {
     this.signals = [];
     this.refreshTimer = null;
 
-    this._savedApiKey = localStorage.getItem('testnet_api_key') || '';
-    this._savedSecretKey = localStorage.getItem('testnet_secret_key') || '';
+    this._savedApiKey = localStorage.getItem('testnet_api_key') || '1ysNwTL4RkMVrIEA1P8afA2b8b2WDZa9uscfUh2V3mMpuMTibt02EFXQ1xCLntpv';
+    this._savedSecretKey = localStorage.getItem('testnet_secret_key') || 'aOTGrVdk3jr4etaPeGcOSIwJiOso0QxBiQ54ODJJuLGtGryCrUNEkpMZ4gHf2PT4';
     this.hotPairs = [];
     this.ready = false;
   }
@@ -272,6 +272,8 @@ class App {
         const success = await this.testnet.setKeys(this._savedApiKey, this._savedSecretKey);
         if (success) {
           this.trader.setExecutor(this.testnet);
+          localStorage.setItem('testnet_api_key', this._savedApiKey);
+          localStorage.setItem('testnet_secret_key', this._savedSecretKey);
           const balance = this.testnet.getBalance();
           this.ui.renderTestnetStatus('connected', `Connected. USDT Balance: $${balance.toFixed(2)}`);
         }
