@@ -120,9 +120,9 @@ export class SignalEngine {
     if (hh) { score += 5; reasons.push('Higher high formed'); }
     if (ll) { score -= 5; reasons.push('Lower low formed'); }
 
-    // Classify
-    if (score >= 25) signalType = 'BUY';
-    else if (score <= -25) signalType = 'SELL';
+    // Classify (low thresholds for high-frequency trading)
+    if (score >= 12) signalType = 'BUY';
+    else if (score <= -12) signalType = 'SELL';
 
     const confidence = Math.min(Math.abs(score), 100);
 

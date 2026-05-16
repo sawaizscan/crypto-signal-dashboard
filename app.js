@@ -17,10 +17,10 @@ class App {
     this.ui = new UIRenderer();
     this.trader = new PaperTrader(10000);
     this.testnet = new BinanceTestnet();
-    this.autoTrade = false;
+    this.autoTrade = true;
 
     this.currentSymbol = 'BTCUSDT';
-    this.interval = '15m';
+    this.interval = '1m';
     this.allTickers = [];
     this.candles = [];
     this.signals = [];
@@ -61,6 +61,7 @@ class App {
       this.ready = true;
       this.startRefreshLoop();
       this.bindEvents();
+      document.getElementById('autoTradeToggle').checked = true;
       this.autoConnectTestnet();
     } catch (err) {
       console.error('Init error:', err);
@@ -136,8 +137,8 @@ class App {
     }
 
     if (this.autoTrade) {
-      for (const s of results.slice(0, 3)) {
-        if (s.type !== 'NO TRADE' && s.confidence >= 55) {
+      for (const s of results.slice(0, 5)) {
+        if (s.type !== 'NO TRADE' && s.confidence >= 25) {
           await this.trader.executeSignal(s);
         }
       }
@@ -193,7 +194,7 @@ class App {
 
   startRefreshLoop() {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
-    this.refreshTimer = setInterval(() => this.refreshData(), 30000);
+    this.refreshTimer = setInterval(() => this.refreshData(), 10000);
   }
 
   async changePair(symbol) {

@@ -82,7 +82,7 @@ export class PaperTrader {
   }
 
   positionSize(price) {
-    const riskPerTrade = 0.20;
+    const riskPerTrade = 0.33;
     const maxAmount = this.cash * riskPerTrade;
     const fixedQty = maxAmount / price;
     return Math.max(fixedQty, 0);
@@ -90,7 +90,7 @@ export class PaperTrader {
 
   async executeSignal(signal) {
     if (signal.type === 'NO TRADE') return null;
-    if (signal.confidence < 50) return null;
+    if (signal.confidence < 20) return null;
 
     const price = signal.entry;
 
