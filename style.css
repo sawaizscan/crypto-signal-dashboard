@@ -485,6 +485,186 @@ section h2 {
   font-size: 0.85rem;
 }
 
+.portfolio-section {
+  margin-bottom: 16px;
+}
+
+.portfolio-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-label input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-slider {
+  width: 36px;
+  height: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle-label input:checked + .toggle-slider {
+  background: var(--green-bg);
+  border-color: var(--green);
+}
+
+.toggle-label input:checked + .toggle-slider::after {
+  transform: translateX(16px);
+  background: var(--green);
+}
+
+#portfolioSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.stat-card .stat-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-card .stat-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.stat-card .stat-value.pos {
+  color: var(--green);
+}
+.stat-card .stat-value.neg {
+  color: var(--red);
+}
+.stat-card .stat-value.neutral {
+  color: var(--text-primary);
+}
+
+#positionsPanel {
+  margin-bottom: 12px;
+}
+
+.positions-header, .trade-header {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.position-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.position-row:hover {
+  background: var(--bg-card);
+}
+
+.position-row .sym {
+  font-weight: 600;
+}
+
+.position-row .pos {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.position-row .neg {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.no-positions, .no-trades {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 20px;
+  font-size: 0.8rem;
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: 0.5fr 1.5fr 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+}
+
+.trade-row:hover {
+  background: var(--bg-card);
+}
+
+.trade-row .type-buy {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.trade-row .type-sell {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.trade-row .pnl-win {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.trade-row .pnl-loss {
+  color: var(--red);
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
   .dashboard-grid {
     grid-template-columns: 1fr;

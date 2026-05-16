@@ -7,12 +7,15 @@ import { DataFetcher } from './modules/dataFetcher.js';
 import { computeAllIndicators } from './modules/indicators.js';
 import { SignalEngine } from './modules/signalEngine.js';
 import { UIRenderer } from './modules/uiRenderer.js';
+import { PaperTrader } from './modules/paperTrader.js';
 
 class App {
   constructor() {
     this.fetcher = new DataFetcher();
     this.engine = new SignalEngine();
     this.ui = new UIRenderer();
+    this.trader = new PaperTrader(10000);
+    this.autoTrade = false;
 
     this.currentSymbol = 'BTCUSDT';
     this.interval = '15m';
@@ -45,6 +48,10 @@ class App {
 
       await this.analyzeAndRender();
       this.detectHotPairs();
+
+      this.ui.renderPortfolio(this.trader);
+      this.ui.renderPositions(this.trader);
+      this.ui.renderTradeHistory(this.trader);
 
       this.ready = true;
       this.startRefreshLoop();
@@ -79,6 +86,13 @@ class App {
 
     this.ui.updateChart(this.candles, ind);
     this.ui.renderSignal(signal);
+
+    if (this.autoTrade && signal.type !== 'NO TRADE') {
+      const priceMap = {};
+      priceMap[signal.pair] = signal.entry;
+      this.trader.updatePrices(priceMap);
+      this.trader.executeSignal(signal);
+    }
   }
 
   async scanAllSignals() {
@@ -109,6 +123,14 @@ class App {
       else this.signals.push(s);
     }
 
+    if (this.autoTrade) {
+      for (const s of results.slice(0, 3)) {
+        if (s.type !== 'NO TRADE' && s.confidence >= 55) {
+          this.trader.executeSignal(s);
+        }
+      }
+    }
+
     this.ui.renderSignalsList(results.slice(0, 5));
   }
 
@@ -135,12 +157,23 @@ class App {
       this.ui.renderTickerBar(tickers, this.currentSymbol);
       this.ui.renderMarketOverview(tickers);
 
+      const priceMap = {};
+      for (const t of tickers) {
+        priceMap[t.symbol] = t.price;
+      }
+      this.trader.updatePrices(priceMap);
+      this.trader.checkStopLosses(priceMap);
+
       const klines = await this.fetcher.fetchKlines(this.currentSymbol, this.interval, 100);
       this.candles = klines;
 
       await this.analyzeAndRender();
       this.detectHotPairs();
       this.scanAllSignals();
+
+      this.ui.renderPortfolio(this.trader);
+      this.ui.renderPositions(this.trader);
+      this.ui.renderTradeHistory(this.trader);
     } catch (err) {
       console.error('Refresh error:', err);
     }
@@ -204,6 +237,22 @@ class App {
 
     document.getElementById('exportBtn').addEventListener('click', () => {
       this.ui.exportSignalHistoryToCSV(this.engine.signalHistory);
+    });
+
+    document.getElementById('autoTradeToggle').addEventListener('change', (e) => {
+      this.autoTrade = e.target.checked;
+      if (this.autoTrade) {
+        this.ui.playAlertSound();
+      }
+    });
+
+    document.getElementById('resetPortfolioBtn').addEventListener('click', () => {
+      if (confirm('Reset paper trading portfolio to $10,000? This will clear all positions and history.')) {
+        this.trader.reset(10000);
+        this.ui.renderPortfolio(this.trader);
+        this.ui.renderPositions(this.trader);
+        this.ui.renderTradeHistory(this.trader);
+      }
     });
   }
 }

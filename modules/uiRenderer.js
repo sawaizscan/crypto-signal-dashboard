@@ -374,4 +374,104 @@ export class UIRenderer {
       // Audio not available
     }
   }
+
+  renderPortfolio(portfolio) {
+    const el = document.getElementById('portfolioSummary');
+    if (!el) return;
+
+    const pnlCls = portfolio.totalPnL >= 0 ? 'pos' : 'neg';
+    const eqCls = portfolio.totalPnLPercent >= 0 ? 'pos' : 'neg';
+    const sign = portfolio.totalPnL >= 0 ? '+' : '';
+
+    el.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-label">Balance</div>
+        <div class="stat-value neutral">$${this.fmtPriceShort(portfolio.equity)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">P&amp;L</div>
+        <div class="stat-value ${pnlCls}">${sign}$${this.fmtPriceShort(Math.abs(portfolio.totalPnL))}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Return</div>
+        <div class="stat-value ${eqCls}">${sign}${portfolio.totalPnLPercent.toFixed(2)}%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Open Positions</div>
+        <div class="stat-value neutral">${portfolio.openPositionsCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Trades</div>
+        <div class="stat-value neutral">${portfolio.totalTrades}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value neutral">${portfolio.winRate.toFixed(0)}%</div>
+      </div>
+    `;
+  }
+
+  renderPositions(portfolio) {
+    const el = document.getElementById('positionsPanel');
+    if (!el) return;
+
+    const syms = Object.keys(portfolio.positions);
+    if (syms.length === 0) {
+      el.innerHTML = `<div class="no-positions">No open positions</div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="positions-header">
+        <span>Symbol</span><span>Qty</span><span>Entry</span><span>Current</span><span>P&amp;L</span><span>Return</span>
+      </div>
+      ${syms.map(sym => {
+        const pos = portfolio.positions[sym];
+        const pnl = (pos.currentPrice - pos.entryPrice) * pos.quantity;
+        const pnlPct = ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
+        const pnlCls = pnl >= 0 ? 'pos' : 'neg';
+        const sign = pnl >= 0 ? '+' : '';
+        return `<div class="position-row">
+          <span class="sym">${sym.replace('USDT', '/USDT')}</span>
+          <span>${pos.quantity.toFixed(4)}</span>
+          <span>$${this.fmtPrice(pos.entryPrice)}</span>
+          <span>$${this.fmtPrice(pos.currentPrice)}</span>
+          <span class="${pnlCls}">${sign}$${this.fmtPriceShort(Math.abs(pnl))}</span>
+          <span class="${pnlCls}">${sign}${pnlPct.toFixed(2)}%</span>
+        </div>`;
+      }).join('')}
+    `;
+  }
+
+  renderTradeHistory(portfolio) {
+    const el = document.getElementById('tradeHistory');
+    if (!el) return;
+
+    const recent = portfolio.trades.slice(-20).reverse();
+    if (recent.length === 0) {
+      el.innerHTML = `<div class="no-trades">No trade history yet</div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="trade-header">
+        <span>Type</span><span>Symbol</span><span>Price</span><span>Qty</span><span>Time</span><span>P&amp;L</span>
+      </div>
+      ${recent.map(t => {
+        const typeCls = t.type === 'BUY' ? 'type-buy' : 'type-sell';
+        const pnlDisplay = t.pnl !== null
+          ? `<span class="${t.pnl >= 0 ? 'pnl-win' : 'pnl-loss'}">${t.pnl >= 0 ? '+' : ''}$${this.fmtPriceShort(Math.abs(t.pnl))}</span>`
+          : `<span style="color:var(--text-muted)">—</span>`;
+        const timeStr = new Date(t.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `<div class="trade-row">
+          <span class="${typeCls}">${t.type}</span>
+          <span>${t.symbol.replace('USDT', '/USDT')}</span>
+          <span>$${this.fmtPrice(t.price)}</span>
+          <span>${t.quantity.toFixed(4)}</span>
+          <span>${timeStr}</span>
+          ${pnlDisplay}
+        </div>`;
+      }).join('')}
+    `;
+  }
 }
