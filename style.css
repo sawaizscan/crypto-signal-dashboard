@@ -191,7 +191,7 @@ body{min-height:100vh;overflow-x:hidden}
 .footer-inner{display:flex;align-items:center;justify-content:space-between;font-size:12px}
 .footer-brand{font-weight:700;color:var(--text-muted)}
 .footer-disc{color:var(--text-muted);font-size:11px}
-.footer-bot{font-family:var(--mono);font-size:11px;color:var(--text-secondary)}
+.footer-bot,.footer-ws{font-family:var(--mono);font-size:11px;color:var(--text-secondary);margin-left:12px}
 .footer-settings-btn{background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:.2s}
 .footer-settings-btn:hover{background:rgba(255,255,255,.06);color:var(--text-primary)}
 

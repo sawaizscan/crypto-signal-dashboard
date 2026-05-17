@@ -270,14 +270,26 @@ class App {
   }
 
   connectWebSockets() {
-    this.ws.onMarketUpdate((pair, candle) => this.handleNewCandle(pair, candle));
+    this.ws.onMarketUpdate((pair, candle) => {
+      console.log(`[WS] Kline closed ${pair} @ ${candle.close}`);
+      this.handleNewCandle(pair, candle);
+    });
     this.ws.onUserUpdate((msg) => this.handleAccountUpdate(msg));
     this.ws.onStatusChange((type, status) => {
+      console.log(`[WS] ${type}: ${status}`);
       this._wsConnected = status === 'connected';
+      const el = document.getElementById('footerWsStatus');
+      if (el) {
+        const dot = status === 'connected' ? '🟢' : status === 'error' ? '🔴' : '⚫';
+        el.textContent = `WS ${type}=${dot}`;
+      }
     });
     this.ws.connectMarket(PAIRS);
     if (this.testnet.connected) {
+      console.log('[WS] Connecting user stream...');
       this.ws.connectUser(this._savedApiKey, this._savedSecretKey);
+    } else {
+      console.log('[WS] User stream skipped — testnet not connected');
     }
   }
 
@@ -402,16 +414,22 @@ class App {
   async autoConnectTestnet() {
     if (this._savedApiKey && this._savedSecretKey) {
       try {
+        console.log('[TESTNET] Connecting with saved keys...');
         const success = await this.testnet.setKeys(this._savedApiKey, this._savedSecretKey);
         if (success) {
+          console.log('[TESTNET] Connected, wallet:', this.testnet.getBalance());
           this.trader.setExecutor(this.testnet);
           this.trader.enableTestnetPortfolio();
           await this.trader.syncFromTestnet();
+          console.log('[TESTNET] Sync complete — equity:', this.trader.equity, 'positions:', this.trader.openPositionsCount);
         }
       } catch {
+        console.warn('[TESTNET] Connection failed — falling back to paper trading');
         this.testnet.disconnect();
         this.trader.setExecutor(null);
       }
+    } else {
+      console.log('[TESTNET] No saved keys — using paper trading');
     }
   }
 
