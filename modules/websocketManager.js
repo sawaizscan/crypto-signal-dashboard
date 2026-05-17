@@ -107,6 +107,8 @@ export class WebSocketManager {
       return;
     }
 
+    this._intentionalClose = false;
+
     this.userWs.onopen = () => {
       this._emitStatus('user', 'connected');
     };

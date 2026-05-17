@@ -56,6 +56,11 @@ class App {
       this.startEvaluationLoop();
       this.bindEvents();
       await this.autoConnectTestnet();
+      if (this.testnet.connected) {
+        this.ui.renderPortfolio(this.trader);
+        this.ui.renderPositions(this.trader);
+        this.ui.renderTradeHistory(this.trader);
+      }
       this.tryConnectServer();
       this.connectWebSockets();
     } catch (err) {
@@ -372,6 +377,9 @@ class App {
         localStorage.setItem('testnet_api_key', apiKey);
         localStorage.setItem('testnet_secret_key', secretKey);
         await this.trader.syncFromTestnet();
+        this.ui.renderPortfolio(this.trader);
+        this.ui.renderPositions(this.trader);
+        this.ui.renderTradeHistory(this.trader);
         this.ws.connectUser(apiKey, secretKey);
       }
     } catch {
