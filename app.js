@@ -224,6 +224,12 @@ class App {
       this.detectHotPairs();
       this.scanAllSignals();
 
+      if (this.testnet.connected) {
+        await this.trader.syncFromTestnet();
+        const w = this.testnet.getWalletPct();
+        this.ui.renderTestnetStatus('connected', `Testnet: $${w.balance.toFixed(2)} | Equity: $${w.equity.toFixed(2)} | PnL: ${(w.equity - this.trader.initialBalance) >= 0 ? '+' : ''}$${(w.equity - this.trader.initialBalance).toFixed(2)}`);
+      }
+
       this.ui.renderPortfolio(this.trader);
       this.ui.renderPositions(this.trader);
       this.ui.renderTradeHistory(this.trader);
@@ -320,10 +326,12 @@ class App {
       const success = await this.testnet.setKeys(apiKey, secretKey);
       if (success) {
         this.trader.setExecutor(this.testnet);
+        this.trader.enableTestnetPortfolio();
         localStorage.setItem('testnet_api_key', apiKey);
         localStorage.setItem('testnet_secret_key', secretKey);
-        const balance = this.testnet.getBalance();
-        this.ui.renderTestnetStatus('connected', `Connected. USDT Balance: $${balance.toFixed(2)}`);
+        await this.trader.syncFromTestnet();
+        const w = this.testnet.getWalletPct();
+        this.ui.renderTestnetStatus('connected', `Testnet: $${w.balance.toFixed(2)} | Equity: $${w.equity.toFixed(2)}`);
         this.ui.playAlertSound();
       }
     } catch (err) {
@@ -336,6 +344,7 @@ class App {
   disconnectTestnet() {
     this.testnet.disconnect();
     this.trader.setExecutor(null);
+    this.trader.disableTestnetPortfolio();
     localStorage.removeItem('testnet_api_key');
     localStorage.removeItem('testnet_secret_key');
     this.ui.renderTestnetStatus('disconnected', 'Disconnected from testnet');
@@ -349,10 +358,12 @@ class App {
         const success = await this.testnet.setKeys(this._savedApiKey, this._savedSecretKey);
         if (success) {
           this.trader.setExecutor(this.testnet);
+          this.trader.enableTestnetPortfolio();
           localStorage.setItem('testnet_api_key', this._savedApiKey);
           localStorage.setItem('testnet_secret_key', this._savedSecretKey);
-          const balance = this.testnet.getBalance();
-          this.ui.renderTestnetStatus('connected', `Connected. USDT Balance: $${balance.toFixed(2)}`);
+          await this.trader.syncFromTestnet();
+          const w = this.testnet.getWalletPct();
+          this.ui.renderTestnetStatus('connected', `Testnet: $${w.balance.toFixed(2)} | Equity: $${w.equity.toFixed(2)}`);
         }
       } catch {
         this.testnet.disconnect();
@@ -393,6 +404,15 @@ class App {
     });
 
     document.getElementById('resetPortfolioBtn').addEventListener('click', () => {
+      if (this.trader.useTestnetPortfolio) {
+        if (confirm('Reset to testnet balance? This will just reload from the testnet API.')) {
+          this.trader.syncFromTestnet();
+          this.ui.renderPortfolio(this.trader);
+          this.ui.renderPositions(this.trader);
+          this.ui.renderTradeHistory(this.trader);
+        }
+        return;
+      }
       if (confirm('Reset paper trading portfolio to $10,000? This will clear all positions and history.')) {
         this.trader.reset(10000);
         this.ui.renderPortfolio(this.trader);

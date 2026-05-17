@@ -871,6 +871,26 @@ section h2 {
   border-left: 3px solid var(--text-muted);
 }
 
+/* Mode badge in portfolio */
+.mode-badge {
+  font-size: 10px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* Pos badge for testnet positions */
+.pos-badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
 /* Server URL row */
 .server-url-row {
   display: flex;

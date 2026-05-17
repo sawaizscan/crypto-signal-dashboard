@@ -1,8 +1,3 @@
-/**
- * PaperTrader — automated paper trading engine with leverage support
- * Executes signals with virtual margin × leverage, tracks P&L
- */
-
 const STORAGE_KEY = 'crypto_paper_portfolio';
 
 export class PaperTrader {
@@ -14,6 +9,10 @@ export class PaperTrader {
     this.executionMode = 'local';
     this.lastOrderResults = [];
     this.signalEngineRef = null;
+    this.useTestnetPortfolio = false;
+    this._testnet = null;
+    this._testnetEquity = 0;
+    this._testnetPositions = [];
     this.load();
   }
 
@@ -24,16 +23,71 @@ export class PaperTrader {
   setExecutor(executor) {
     this.executor = executor;
     this.executionMode = executor && executor.connected ? 'testnet' : 'local';
+    this._testnet = executor;
   }
 
-  async setLeverageOnTestnet(symbol) {
-    if (this.executor && this.executor.connected && this.executor.setLeverage) {
-      try {
-        await this.executor.setLeverage(symbol, this.leverage);
-      } catch (err) {
-        console.warn(`Failed to set leverage for ${symbol}:`, err.message);
+  enableTestnetPortfolio() {
+    this.useTestnetPortfolio = true;
+  }
+
+  disableTestnetPortfolio() {
+    this.useTestnetPortfolio = false;
+  }
+
+  async syncFromTestnet() {
+    if (!this._testnet || !this._testnet.connected) return;
+    try {
+      await this._testnet.refreshAccount();
+      const w = this._testnet.getWalletPct();
+      this._testnetEquity = w.equity;
+      this._testnetPositions = this._testnet.getPositions();
+      if (this.initialBalance === 10000 && w.balance > 0) {
+        this.initialBalance = w.balance;
+        this.cash = w.balance;
       }
+    } catch {}
+  }
+
+  get equity() {
+    if (this.useTestnetPortfolio && this._testnet) {
+      return this._testnetEquity;
     }
+    let posValue = 0;
+    for (const sym of Object.keys(this.positions)) {
+      const p = this.positions[sym];
+      const currentVal = p.quantity * (p.currentPrice || p.entryPrice);
+      const pnl = currentVal - (p.margin * p.leverage);
+      posValue += p.margin + pnl;
+    }
+    return this.cash + posValue;
+  }
+
+  get totalPnL() {
+    if (this.useTestnetPortfolio && this._testnet) {
+      return this._testnetEquity - this.initialBalance;
+    }
+    return this.equity - this.initialBalance;
+  }
+
+  get totalPnLPercent() {
+    return this.initialBalance > 0 ? (this.totalPnL / this.initialBalance) * 100 : 0;
+  }
+
+  get openPositionsCount() {
+    if (this.useTestnetPortfolio && this._testnet) {
+      return this._testnetPositions.length;
+    }
+    return Object.keys(this.positions).length;
+  }
+
+  get totalTrades() {
+    return this.trades.length;
+  }
+
+  get winRate() {
+    const closed = this.trades.filter(t => t.pnl !== null);
+    if (closed.length === 0) return 0;
+    return (closed.filter(t => t.pnl > 0).length / closed.length) * 100;
   }
 
   load() {
@@ -69,39 +123,6 @@ export class PaperTrader {
     this.positions = {};
     this.trades = [];
     if (!skipSave) this.save();
-  }
-
-  get equity() {
-    let posValue = 0;
-    for (const sym of Object.keys(this.positions)) {
-      const p = this.positions[sym];
-      const currentVal = p.quantity * (p.currentPrice || p.entryPrice);
-      const pnl = currentVal - (p.margin * p.leverage);
-      posValue += p.margin + pnl;
-    }
-    return this.cash + posValue;
-  }
-
-  get totalPnL() {
-    return this.equity - this.initialBalance;
-  }
-
-  get totalPnLPercent() {
-    return this.initialBalance > 0 ? (this.totalPnL / this.initialBalance) * 100 : 0;
-  }
-
-  get openPositionsCount() {
-    return Object.keys(this.positions).length;
-  }
-
-  get totalTrades() {
-    return this.trades.length;
-  }
-
-  get winRate() {
-    const closed = this.trades.filter(t => t.pnl !== null);
-    if (closed.length === 0) return 0;
-    return (closed.filter(t => t.pnl > 0).length / closed.length) * 100;
   }
 
   async executeSignal(signal) {
@@ -170,6 +191,7 @@ export class PaperTrader {
         const orderResult = await this.executor.placeMarketOrder(symbol, 'BUY', qty);
         trade.orderId = orderResult.orderId;
         trade.executedPrice = orderResult.price;
+        trade.testnetExecuted = true;
         this.lastOrderResults.push(orderResult);
       } catch (err) {
         trade.error = err.message;
@@ -217,6 +239,7 @@ export class PaperTrader {
         const orderResult = await this.executor.placeMarketOrder(symbol, 'SELL', qty);
         trade.orderId = orderResult.orderId;
         trade.executedPrice = orderResult.price;
+        trade.testnetExecuted = true;
         this.lastOrderResults.push(orderResult);
       } catch (err) {
         trade.error = err.message;
@@ -264,5 +287,9 @@ export class PaperTrader {
       await this.sell(close.symbol, close.price);
     }
     return toClose;
+  }
+
+  getTestnetPositions() {
+    return this._testnetPositions;
   }
 }

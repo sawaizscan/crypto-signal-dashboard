@@ -414,9 +414,10 @@ export class UIRenderer {
     const eqCls = portfolio.totalPnLPercent >= 0 ? 'pos' : 'neg';
     const sign = portfolio.totalPnL >= 0 ? '+' : '';
 
+    const mode = portfolio.useTestnetPortfolio ? 'Testnet' : 'Paper';
     el.innerHTML = `
       <div class="stat-card">
-        <div class="stat-label">Balance</div>
+        <div class="stat-label">Balance <span class="mode-badge">${mode}</span></div>
         <div class="stat-value neutral">$${this.fmtPriceShort(portfolio.equity)}</div>
       </div>
       <div class="stat-card">
@@ -449,6 +450,31 @@ export class UIRenderer {
   renderPositions(portfolio) {
     const el = document.getElementById('positionsPanel');
     if (!el) return;
+
+    // Show testnet positions when in testnet portfolio mode
+    const tnPositions = portfolio.getTestnetPositions ? portfolio.getTestnetPositions() : [];
+    if (portfolio.useTestnetPortfolio && tnPositions.length > 0) {
+      el.innerHTML = `
+        <div class="pos-badge">Binance Testnet Positions</div>
+        <div class="positions-header">
+          <span>Symbol</span><span>Size</span><span>Entry</span><span>Mark</span><span>Lev</span><span>UPnL</span>
+        </div>
+        ${tnPositions.map(p => {
+          const pnl = p.unrealizedProfit;
+          const cls = pnl >= 0 ? 'pos' : 'neg';
+          const sign = pnl >= 0 ? '+' : '';
+          return `<div class="position-row">
+            <span class="sym">${p.symbol.replace('USDT', '/USDT')}</span>
+            <span>${p.positionAmt.toFixed(4)}</span>
+            <span>$${this.fmtPrice(p.entryPrice)}</span>
+            <span>$${this.fmtPrice(p.markPrice)}</span>
+            <span>${p.leverage}x</span>
+            <span class="${cls}">${sign}$${this.fmtPriceShort(Math.abs(pnl))}</span>
+          </div>`;
+        }).join('')}
+      `;
+      return;
+    }
 
     const syms = Object.keys(portfolio.positions);
     if (syms.length === 0) {

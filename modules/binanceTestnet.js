@@ -99,6 +99,39 @@ export class BinanceTestnet {
     return usdt ? parseFloat(usdt.walletBalance) : 0;
   }
 
+  async refreshAccount() {
+    if (!this.connected) return;
+    try {
+      const info = await this.signedRequest('GET', '/fapi/v2/account');
+      this.account = info;
+    } catch {}
+  }
+
+  getPositions() {
+    if (!this.account || !this.account.positions) return [];
+    return this.account.positions
+      .filter(p => parseFloat(p.positionAmt) !== 0)
+      .map(p => ({
+        symbol: p.symbol,
+        entryPrice: parseFloat(p.entryPrice),
+        markPrice: parseFloat(p.markPrice),
+        positionAmt: parseFloat(p.positionAmt),
+        unrealizedProfit: parseFloat(p.unrealizedProfit),
+        leverage: parseFloat(p.leverage),
+        liquidationPrice: parseFloat(p.liquidationPrice),
+      }));
+  }
+
+  getWalletPct() {
+    if (!this.account || !this.account.assets) return 0;
+    const usdt = this.account.assets.find(a => a.asset === 'USDT');
+    if (!usdt) return 0;
+    const wb = parseFloat(usdt.walletBalance);
+    const up = parseFloat(usdt.unrealizedProfit);
+    const cross = parseFloat(usdt.crossWalletBalance);
+    return { balance: wb, unrealizedPnl: up, crossWallet: cross, equity: wb + up };
+  }
+
   async placeMarketOrder(symbol, side, quantity) {
     if (!this.connected) throw new Error('Testnet not connected');
 
