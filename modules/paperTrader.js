@@ -13,6 +13,9 @@ export class PaperTrader {
     this._testnet = null;
     this._testnetEquity = 0;
     this._testnetPositions = [];
+    this._testnetUnrealizedPnl = 0;
+    this._testnetWalletBalance = 0;
+    this._cash = initialBalance;
     this.load();
   }
 
@@ -41,12 +44,25 @@ export class PaperTrader {
       const w = this._testnet.getWalletPct();
       this._testnetEquity = w.equity;
       this._testnetPositions = this._testnet.getPositions();
-      if (this.initialBalance === 10000 && w.balance > 0) {
-        this.initialBalance = w.balance;
-        this.cash = w.balance;
+      this._testnetUnrealizedPnl = w.unrealizedPnl;
+      this._testnetWalletBalance = w.balance;
+      if (w.balance > 0) {
+        if (this.initialBalance === 10000) {
+          this.initialBalance = w.balance;
+        }
+        this._cash = w.balance;
       }
     } catch {}
   }
+
+  get cash() {
+    if (this.useTestnetPortfolio && this._testnet) {
+      return this._testnetWalletBalance;
+    }
+    return this._cash;
+  }
+
+  set cash(v) { this._cash = v; }
 
   get equity() {
     if (this.useTestnetPortfolio && this._testnet) {
@@ -95,7 +111,7 @@ export class PaperTrader {
     if (saved) {
       try {
         const data = JSON.parse(saved);
-        this.cash = data.cash;
+        this._cash = data.cash;
         this.positions = data.positions || {};
         this.trades = data.trades || [];
         this.initialBalance = data.initialBalance || this.initialBalance;
@@ -110,7 +126,7 @@ export class PaperTrader {
 
   save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      cash: this.cash,
+      cash: this._cash,
       positions: this.positions,
       trades: this.trades,
       initialBalance: this.initialBalance,
@@ -119,7 +135,7 @@ export class PaperTrader {
   }
 
   reset(skipSave = false) {
-    this.cash = this.initialBalance;
+    this._cash = this.initialBalance;
     this.positions = {};
     this.trades = [];
     if (!skipSave) this.save();
@@ -138,14 +154,36 @@ export class PaperTrader {
   }
 
   async buy(symbol, price, signal = null) {
-    if (this.cash <= 1) return null;
+    const bal = this.useTestnetPortfolio ? this._testnetWalletBalance : this.cash;
+    if (bal <= 1) return null;
 
-    const margin = this.cash * this.marginPerTrade;
+    const margin = bal * this.marginPerTrade;
     if (margin < 1) return null;
 
     const positionValue = margin * this.leverage;
     const qty = positionValue / price;
     if (qty <= 0) return null;
+
+    if (this.useTestnetPortfolio) {
+      await this.setLeverageOnTestnet(symbol);
+      const trade = {
+        type: 'BUY', symbol, price, quantity: qty, margin,
+        leverage: this.leverage, time: new Date().toISOString(),
+        pnl: null, confidence: signal?.confidence || 0,
+        reasons: signal?.reasons || [], factors: signal?.factors || [],
+        orderId: null,
+      };
+      if (this.executor && this.executor.connected) {
+        try {
+          const r = await this.executor.placeMarketOrder(symbol, 'BUY', qty);
+          trade.orderId = r.orderId; trade.executedPrice = r.price;
+          trade.testnetExecuted = true; this.lastOrderResults.push(r);
+        } catch (err) { trade.error = err.message; }
+      }
+      this.trades.push(trade);
+      this.save();
+      return { symbol, quantity: qty, price, margin, leverage: this.leverage };
+    }
 
     this.cash -= margin;
 
@@ -204,6 +242,31 @@ export class PaperTrader {
   }
 
   async sell(symbol, price, signal = null) {
+    if (this.useTestnetPortfolio) {
+      const tnPos = this._testnetPositions.find(p => p.symbol === symbol);
+      const qty = tnPos ? Math.abs(tnPos.positionAmt) : 0.001;
+      const entry = tnPos ? tnPos.entryPrice : price;
+      const pnl = tnPos ? tnPos.unrealizedProfit : 0;
+      const trade = {
+        type: 'SELL', symbol, price, quantity: qty, margin: 0,
+        leverage: this.leverage, time: new Date().toISOString(),
+        pnl, pnlPercent: ((price - entry) / entry) * 100 * this.leverage,
+        confidence: signal?.confidence || 0,
+        reasons: signal?.reasons || [], factors: signal?.factors || [],
+        orderId: null,
+      };
+      if (this.executor && this.executor.connected) {
+        try {
+          const r = await this.executor.placeMarketOrder(symbol, 'SELL', qty);
+          trade.orderId = r.orderId; trade.executedPrice = r.price;
+          trade.testnetExecuted = true; this.lastOrderResults.push(r);
+        } catch (err) { trade.error = err.message; }
+      }
+      this.trades.push(trade);
+      this.save();
+      return { symbol, quantity: qty, price, pnl };
+    }
+
     const pos = this.positions[symbol];
     if (!pos) return null;
 
@@ -216,17 +279,11 @@ export class PaperTrader {
 
     const trade = {
       type: 'SELL',
-      symbol,
-      price,
-      quantity: qty,
-      margin: pos.margin,
-      leverage: pos.leverage,
-      time: new Date().toISOString(),
-      pnl,
-      pnlPercent: ((price - pos.entryPrice) / pos.entryPrice) * 100 * pos.leverage,
+      symbol, price, quantity: qty, margin: pos.margin,
+      leverage: pos.leverage, time: new Date().toISOString(),
+      pnl, pnlPercent: ((price - pos.entryPrice) / pos.entryPrice) * 100 * pos.leverage,
       confidence: signal?.confidence || 0,
-      reasons: signal?.reasons || [],
-      factors: signal?.factors || [],
+      reasons: signal?.reasons || [], factors: signal?.factors || [],
       orderId: null,
     };
 
@@ -236,14 +293,10 @@ export class PaperTrader {
 
     if (this.executor && this.executor.connected) {
       try {
-        const orderResult = await this.executor.placeMarketOrder(symbol, 'SELL', qty);
-        trade.orderId = orderResult.orderId;
-        trade.executedPrice = orderResult.price;
-        trade.testnetExecuted = true;
-        this.lastOrderResults.push(orderResult);
-      } catch (err) {
-        trade.error = err.message;
-      }
+        const r = await this.executor.placeMarketOrder(symbol, 'SELL', qty);
+        trade.orderId = r.orderId; trade.executedPrice = r.price;
+        trade.testnetExecuted = true; this.lastOrderResults.push(r);
+      } catch (err) { trade.error = err.message; }
     }
 
     this.trades.push(trade);
@@ -260,6 +313,7 @@ export class PaperTrader {
   }
 
   async checkStopLosses(prices) {
+    if (this.useTestnetPortfolio) return [];
     const toClose = [];
     for (const [symbol, pos] of Object.entries(this.positions)) {
       const currPrice = prices[symbol];

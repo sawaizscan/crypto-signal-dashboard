@@ -226,8 +226,9 @@ class App {
 
       if (this.testnet.connected) {
         await this.trader.syncFromTestnet();
-        const w = this.testnet.getWalletPct();
-        this.ui.renderTestnetStatus('connected', `Testnet: $${w.balance.toFixed(2)} | Equity: $${w.equity.toFixed(2)} | PnL: ${(w.equity - this.trader.initialBalance) >= 0 ? '+' : ''}$${(w.equity - this.trader.initialBalance).toFixed(2)}`);
+        const pnl = this.trader.totalPnL;
+        const sign = pnl >= 0 ? '+' : '';
+        this.ui.renderTestnetStatus('connected', `Wallet: $${this.trader._testnetWalletBalance.toFixed(2)} | UPnL: ${this.trader._testnetUnrealizedPnl >= 0 ? '+' : ''}$${this.trader._testnetUnrealizedPnl.toFixed(2)} | Total PnL: ${sign}$${pnl.toFixed(2)}`);
       }
 
       this.ui.renderPortfolio(this.trader);
