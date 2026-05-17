@@ -346,4 +346,12 @@ export class PaperTrader {
   getTestnetPositions() {
     return this._testnetPositions;
   }
+
+  async setLeverageOnTestnet(symbol) {
+    if (this.executor && this.executor.connected && this.executor.setLeverage) {
+      try {
+        await this.executor.setLeverage(symbol, this.leverage);
+      } catch {}
+    }
+  }
 }

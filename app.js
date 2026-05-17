@@ -32,6 +32,8 @@ class App {
     this.evaluator = new Evaluator();
     this._evalTimer = null;
     this._evalIntervalMin = 15;
+    this._executedSignals = {};
+    this._sentimentTimer = null;
   }
 
   async init() {
@@ -182,6 +184,15 @@ class App {
 
   async refreshData() {
     try {
+      if (this.testnet.connected) {
+        await this.trader.syncFromTestnet();
+        const activePairs = new Set((this.trader.getTestnetPositions() || []).map(p => p.symbol));
+        for (const key of Object.keys(this._executedSignals)) {
+          const pair = key.split('_')[0];
+          if (!activePairs.has(pair)) delete this._executedSignals[key];
+        }
+      }
+
       const tickers = await this.fetcher.fetchTopPairs(30);
       this.allTickers = tickers;
 
@@ -190,7 +201,10 @@ class App {
         if (PAIRS.includes(t.symbol)) priceMap[t.symbol] = t.price;
       }
       this.trader.updatePrices(priceMap);
-      await this.trader.checkStopLosses(priceMap);
+
+      if (!this.trader.useTestnetPortfolio) {
+        await this.trader.checkStopLosses(priceMap);
+      }
 
       await this.fetchAllPairCandles();
       await this.runAllAnalysis();
@@ -201,10 +215,23 @@ class App {
       }
 
       if (this.autoTrade) {
+        const activePositions = this.trader.useTestnetPortfolio
+          ? new Set((this.trader.getTestnetPositions() || []).map(p => p.symbol))
+          : new Set(Object.keys(this.trader.positions));
+
         for (const pair of PAIRS) {
           const s = this.signals[pair];
-          if (s && s.type !== 'NO TRADE' && s.confidence >= 15 && !this.trader.positions[pair]) {
-            await this.trader.executeSignal(s);
+          if (!s || s.type === 'NO TRADE' || s.confidence < 15) continue;
+          if (activePositions.has(pair)) continue;
+
+          const sigKey = `${pair}_${s.type}`;
+          if (this._executedSignals[sigKey]) continue;
+
+          console.log(`[EXEC] ${pair} ${s.type} conf=${s.confidence} entry=${s.entry}`);
+          const result = await this.trader.executeSignal(s);
+          if (result) {
+            this._executedSignals[sigKey] = Date.now();
+            console.log(`[EXEC] ${pair} OK`, result);
           }
         }
       }
@@ -217,10 +244,6 @@ class App {
       this.ui.updatePortfolioMini(this.trader.equity, miniPnl, this.trader.totalTrades, this.trader.winRate);
 
       this.ui.updateTime();
-
-      if (this.testnet.connected) {
-        await this.trader.syncFromTestnet();
-      }
     } catch (err) {
       console.error('Refresh error:', err);
     }
