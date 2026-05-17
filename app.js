@@ -32,6 +32,11 @@ class App {
     this._savedSecretKey = localStorage.getItem('testnet_secret_key') || 'aOTGrVdk3jr4etaPeGcOSIwJiOso0QxBiQ54ODJJuLGtGryCrUNEkpMZ4gHf2PT4';
     this.hotPairs = [];
     this.ready = false;
+
+    this.serverUrl = localStorage.getItem('bot_server_url') || '';
+    this.serverMode = false;
+    this._serverTrades = [];
+    this._serverPositions = [];
   }
 
   async init() {
@@ -65,6 +70,8 @@ class App {
       this.bindEvents();
       document.getElementById('autoTradeToggle').checked = true;
       this.autoConnectTestnet();
+
+      this.tryConnectServer();
     } catch (err) {
       console.error('Init error:', err);
       this.ui.showError('signalPanel', 'Failed to load data. Check console for details.');
@@ -77,6 +84,27 @@ class App {
       this.bindEvents();
       setTimeout(() => this.init(), 5000);
     }
+  }
+
+  async tryConnectServer() {
+    const urls = [];
+    if (this.serverUrl) urls.push(this.serverUrl);
+    urls.push('http://localhost:3001');
+    for (const url of urls) {
+      try {
+        const resp = await fetch(`${url}/api/health`);
+        if (resp.ok) {
+          this.serverUrl = url;
+          this.serverMode = true;
+          localStorage.setItem('bot_server_url', url);
+          this.ui.renderServerStatus('connected', `Bot server connected`);
+          console.log(`Connected to bot server at ${url}`);
+          return;
+        }
+      } catch {}
+    }
+    this.serverMode = false;
+    this.ui.renderServerStatus('disconnected', 'No bot server — running locally');
   }
 
   async analyzeAndRender() {
@@ -171,6 +199,11 @@ class App {
 
   async refreshData() {
     try {
+      if (this.serverMode && this.serverUrl) {
+        await this.pollServer();
+        return;
+      }
+
       const tickers = await this.fetcher.fetchTopPairs(30);
       this.allTickers = tickers;
 
@@ -196,6 +229,42 @@ class App {
       this.ui.renderTradeHistory(this.trader);
     } catch (err) {
       console.error('Refresh error:', err);
+    }
+  }
+
+  async pollServer() {
+    try {
+      const base = this.serverUrl;
+      const [status, trades, positions, tickerData] = await Promise.all([
+        fetch(`${base}/api/status`).then(r => r.json()),
+        fetch(`${base}/api/trades`).then(r => r.json()),
+        fetch(`${base}/api/positions`).then(r => r.json()),
+        fetch(`${base}/api/ticker`).then(r => r.json()).catch(() => []),
+      ]);
+
+      if (tickerData.length > 0) this.allTickers = tickerData;
+
+      this.ui.renderTickerBar(tickerData, this.currentSymbol);
+      this.ui.renderMarketOverview(tickerData);
+
+      if (status) {
+        this.ui.renderServerStatus('connected', `Bot: $${status.equity} (${status.pnlPct}%) | WR: ${status.winRate}% | Trades: ${status.trades} | Uptime: ${Math.floor(status.uptime / 60)}m`);
+      }
+
+      if (trades) {
+        this._serverTrades = trades;
+        this.ui.renderTradeHistory({ trades });
+      }
+
+      if (positions) {
+        this._serverPositions = positions;
+        this.ui.renderServerPositions(positions);
+      }
+
+      this.detectHotPairs();
+    } catch (err) {
+      this.serverMode = false;
+      this.ui.renderServerStatus('disconnected', 'Bot server lost — switched to local');
     }
   }
 
@@ -343,6 +412,29 @@ class App {
 
     document.getElementById('disconnectTestnetBtn').addEventListener('click', () => {
       this.disconnectTestnet();
+    });
+
+    document.getElementById('connectServerBtn').addEventListener('click', async () => {
+      const url = document.getElementById('serverUrl').value.trim();
+      if (!url) return;
+      try {
+        const resp = await fetch(`${url}/api/health`);
+        if (resp.ok) {
+          this.serverUrl = url;
+          this.serverMode = true;
+          localStorage.setItem('bot_server_url', url);
+          this.ui.renderServerStatus('connected', `Bot server connected`);
+        } else {
+          this.ui.renderServerStatus('disconnected', `Server at ${url} not responding`);
+        }
+      } catch {
+        this.ui.renderServerStatus('disconnected', `Could not connect to ${url}`);
+      }
+    });
+
+    document.getElementById('serverUrl').addEventListener('change', (e) => {
+      this.serverUrl = e.target.value.trim();
+      localStorage.setItem('bot_server_url', this.serverUrl);
     });
   }
 }

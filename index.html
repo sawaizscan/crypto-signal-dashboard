@@ -77,20 +77,36 @@
       </section>
 
       <section class="settings-panel">
-        <button class="settings-toggle" id="settingsToggle">&#x2699; Binance Testnet Settings</button>
+        <button class="settings-toggle" id="settingsToggle">&#x2699; Settings</button>
         <div class="settings-body hidden" id="settingsBody">
-          <label for="testnetApiKey">API Key</label>
-          <input type="text" id="testnetApiKey" placeholder="Enter your Binance Futures Testnet API key" autocomplete="off">
-          <label for="testnetSecretKey">Secret Key</label>
-          <input type="password" id="testnetSecretKey" placeholder="Enter your Binance Futures Testnet secret key" autocomplete="off">
-          <div class="settings-actions">
-            <button class="btn-icon" id="connectTestnetBtn">Connect</button>
-            <button class="btn-icon" id="disconnectTestnetBtn">Disconnect</button>
+          <div class="settings-group">
+            <h3>&#x1f5a5; Bot Server</h3>
+            <div class="server-status" id="serverStatus">Checking for bot server...</div>
+            <label for="serverUrl">Server URL</label>
+            <div class="server-url-row">
+              <input type="text" id="serverUrl" placeholder="http://localhost:3001" autocomplete="off">
+              <button class="btn-icon" id="connectServerBtn">Connect</button>
+            </div>
+            <div class="settings-info">
+              Run <code>node server/index.js</code> on a 24/7 machine (VPS, Raspberry Pi, your PC).<br>
+              The bot trades continuously and reports results here.
+            </div>
           </div>
-          <div class="settings-status" id="testnetStatus"></div>
-          <div class="settings-info">
-            Get free testnet API keys at <a href="https://testnet.binancefuture.com/" target="_blank" rel="noopener">testnet.binancefuture.com</a>.<br>
-            Funds are virtual — no real money involved. Keys are stored locally in your browser.
+          <div class="settings-group">
+            <h3>&#x1f510; Binance Testnet</h3>
+            <label for="testnetApiKey">API Key</label>
+            <input type="text" id="testnetApiKey" placeholder="Enter your Binance Futures Testnet API key" autocomplete="off">
+            <label for="testnetSecretKey">Secret Key</label>
+            <input type="password" id="testnetSecretKey" placeholder="Enter your Binance Futures Testnet secret key" autocomplete="off">
+            <div class="settings-actions">
+              <button class="btn-icon" id="connectTestnetBtn">Connect</button>
+              <button class="btn-icon" id="disconnectTestnetBtn">Disconnect</button>
+            </div>
+            <div class="settings-status" id="testnetStatus"></div>
+            <div class="settings-info">
+              Get free testnet API keys at <a href="https://testnet.binancefuture.com/" target="_blank" rel="noopener">testnet.binancefuture.com</a>.<br>
+              Funds are virtual — no real money involved. Keys are stored locally in your browser.
+            </div>
           </div>
         </div>
       </section>

@@ -181,6 +181,34 @@ export class UIRenderer {
     });
   }
 
+  renderServerStatus(state, msg) {
+    const el = document.getElementById('serverStatus');
+    if (!el) return;
+    el.className = 'server-status ' + state;
+    el.textContent = msg;
+  }
+
+  renderServerPositions(positions) {
+    const panel = document.getElementById('positionsPanel');
+    if (!panel) return;
+    if (!positions || positions.length === 0) {
+      panel.innerHTML = '<div class="no-positions">No open positions</div>';
+      return;
+    }
+    const rows = positions.map(p => `<tr>
+      <td>${p.symbol}</td>
+      <td class="${p.pnl >= 0 ? 'positive' : 'negative'}">$${p.entry?.toFixed(2)}</td>
+      <td>$${p.price?.toFixed(2)}</td>
+      <td class="${p.pnl >= 0 ? 'positive' : 'negative'}">${p.pnl >= 0 ? '+' : ''}${p.pnl?.toFixed(2)}</td>
+      <td>${p.leverage}x</td>
+      <td>$${p.margin?.toFixed(2)}</td>
+    </tr>`).join('');
+    panel.innerHTML = `<table class="positions-table">
+      <thead><tr><th>Pair</th><th>Entry</th><th>Price</th><th>PnL</th><th>Lev</th><th>Margin</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
   renderSignal(signal) {
     const panel = document.getElementById('signalPanel');
     if (!panel) return;

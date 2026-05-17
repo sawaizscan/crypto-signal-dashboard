@@ -836,3 +836,47 @@ section h2 {
     gap: 8px;
   }
 }
+
+/* Settings groups */
+.settings-group {
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.settings-group h3 {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+/* Server status */
+.server-status {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+}
+.server-status.connected {
+  color: var(--green);
+  border-left: 3px solid var(--green);
+}
+.server-status.disconnected {
+  color: var(--text-muted);
+  border-left: 3px solid var(--text-muted);
+}
+
+/* Server URL row */
+.server-url-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.server-url-row input {
+  flex: 1;
+}
