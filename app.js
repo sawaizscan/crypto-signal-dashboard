@@ -51,6 +51,7 @@ class App {
       this.ui.renderPortfolio(this.trader);
       this.ui.renderPositions(this.trader);
       this.ui.renderTradeHistory(this.trader);
+      this.ui.updatePortfolioMini(this.trader.equity, this.trader.totalPnL, this.trader.totalTrades, this.trader.winRate);
 
       this.startRefreshLoop();
       this.startEvaluationLoop();
@@ -60,11 +61,12 @@ class App {
         this.ui.renderPortfolio(this.trader);
         this.ui.renderPositions(this.trader);
         this.ui.renderTradeHistory(this.trader);
+        this.ui.updatePortfolioMini(this.trader.equity, this.trader.totalPnL, this.trader.totalTrades, this.trader.winRate);
       }
       this.tryConnectServer();
       this.connectWebSockets();
     } catch (err) {
-      console.error('Init error:', err);
+      console.error('[INIT] Error:', err);
       this.bindEvents();
       setTimeout(() => this.init(), 5000);
     }
@@ -380,6 +382,7 @@ class App {
         this.ui.renderPortfolio(this.trader);
         this.ui.renderPositions(this.trader);
         this.ui.renderTradeHistory(this.trader);
+        this.ui.updatePortfolioMini(this.trader.equity, this.trader.totalPnL, this.trader.totalTrades, this.trader.winRate);
         this.ws.connectUser(apiKey, secretKey);
       }
     } catch {
