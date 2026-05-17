@@ -302,13 +302,12 @@ class App {
           this.trader.executeSignal(signal).then(result => {
             if (result) {
               this._executedSignals[sigKey] = Date.now();
-              if (this.testnet.connected) {
-                this.trader.syncFromTestnet().then(() => {
-                  this.ui.renderPortfolio(this.trader);
-                  this.ui.renderPositions(this.trader);
-                  this.ui.renderTradeHistory(this.trader);
-                });
-              }
+              this.trader.syncFromTestnet().then(() => {
+                this.ui.renderPortfolio(this.trader);
+                this.ui.renderPositions(this.trader);
+                this.ui.renderTradeHistory(this.trader);
+                this.ui.updatePortfolioMini(this.trader.equity, this.trader.totalPnL, this.trader.totalTrades, this.trader.winRate);
+              });
             }
           });
         }
