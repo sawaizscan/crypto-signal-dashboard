@@ -253,6 +253,59 @@ export class UIRenderer {
     }).join('');
   }
 
+  renderEvaluation(report, snapshotCount, nextCheckMin) {
+    const badge = document.getElementById('evalBadge');
+    const metrics = document.getElementById('evalMetrics');
+    const pairBreakdown = document.getElementById('evalPairBreakdown');
+    const suggestions = document.getElementById('evalSuggestions');
+    const count = document.getElementById('evalCount');
+    const next = document.getElementById('evalNext');
+
+    if (!report) {
+      if (badge) { badge.textContent = 'Collecting...'; badge.className = 'eval-badge'; }
+      return;
+    }
+
+    const sc = report.scores;
+    if (badge) {
+      badge.textContent = sc >= 70 ? '● Healthy' : sc >= 50 ? '● Watching' : '● Needs Tuning';
+      badge.className = 'eval-badge ' + (sc >= 70 ? 'good' : sc >= 50 ? 'ok' : 'bad');
+    }
+
+    if (metrics) {
+      metrics.innerHTML = `
+        <div class="eval-metric"><div class="eval-metric-label">Live WR</div><div class="eval-metric-value ${report.liveWr >= 60 ? 'good' : report.liveWr >= 50 ? 'ok' : 'bad'}">${report.liveWr}%</div></div>
+        <div class="eval-metric"><div class="eval-metric-label">Profit Factor</div><div class="eval-metric-value ${report.pf >= 2 ? 'good' : report.pf >= 1.5 ? 'ok' : 'bad'}">${report.pf}</div></div>
+        <div class="eval-metric"><div class="eval-metric-label">PnL/hr</div><div class="eval-metric-value ${report.pnlPerH > 0 ? 'good' : 'bad'}">${report.pnlPerH > 0 ? '+' : ''}$${Math.abs(report.pnlPerH).toFixed(2)}</div></div>
+        <div class="eval-metric"><div class="eval-metric-label">Score</div><div class="eval-metric-value ${sc >= 70 ? 'good' : sc >= 50 ? 'ok' : 'bad'}">${sc}/100</div></div>`;
+    }
+
+    if (pairBreakdown) {
+      const pairs = Object.entries(report.pairWr || {});
+      if (pairs.length > 0) {
+        pairBreakdown.innerHTML = pairs.map(([pair, wr]) => {
+          const label = pair.replace('USDT', '');
+          const cls = wr >= 60 ? 'good' : wr >= 0 ? 'ok' : 'bad';
+          const meta = wr < 0 ? 'No data' : `${wr}% WR`;
+          return `<div class="eval-pair-card"><div class="eval-pair-label">${label}</div><div class="eval-pair-wr ${cls}">${wr < 0 ? '—' : wr + '%'}</div><div class="eval-pair-meta">${meta}</div></div>`;
+        }).join('');
+      } else {
+        pairBreakdown.innerHTML = '<div class="eval-pair-card"><div class="eval-pair-label">—</div><div class="eval-pair-meta">No trades yet</div></div>';
+      }
+    }
+
+    if (suggestions) {
+      if (report.suggestions && report.suggestions.length > 0) {
+        suggestions.innerHTML = report.suggestions.map(s => `<div class="eval-suggestion">${s}</div>`).join('');
+      } else {
+        suggestions.innerHTML = '<div class="eval-suggestion" style="color:var(--text-muted)">No adjustments needed</div>';
+      }
+    }
+
+    if (count) count.textContent = `${snapshotCount} snapshots`;
+    if (next) next.textContent = `Next check: ~${nextCheckMin} min`;
+  }
+
   playAlertSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();

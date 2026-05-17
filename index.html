@@ -185,7 +185,31 @@
       </div>
     </section>
 
-    <!-- SECRETS / SETTINGS FOOTER -->
+    <!-- EVALUATION SECTION -->
+    <section class="eval-section" id="evalSection">
+      <div class="eval-header" id="evalToggle">
+        <span class="eval-header-icon">◈</span>
+        <span class="eval-header-title">Live Evaluation</span>
+        <span class="eval-badge" id="evalBadge">—</span>
+        <span class="eval-header-arrow">▾</span>
+      </div>
+      <div class="eval-body hidden" id="evalBody">
+        <div class="eval-grid">
+          <div class="eval-metrics" id="evalMetrics"></div>
+          <div class="eval-pair-breakdown" id="evalPairBreakdown"></div>
+        </div>
+        <div class="eval-suggestions" id="evalSuggestions">
+          <div class="empty-state">Collecting data — first report in ~15 min</div>
+        </div>
+        <div class="eval-history-link">
+          <span class="eval-count" id="evalCount">0 snapshots</span>
+          <span class="eval-next" id="evalNext">Next check: —</span>
+          <button class="eval-reset-btn" id="evalResetBtn">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
     <footer class="footer">
       <div class="footer-inner">
         <span class="footer-brand">◆ APEX SIGNALS</span>

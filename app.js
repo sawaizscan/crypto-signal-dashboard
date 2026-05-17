@@ -4,6 +4,7 @@ import { SignalEngine } from './modules/signalEngine.js';
 import { UIRenderer } from './modules/uiRenderer.js';
 import { PaperTrader } from './modules/paperTrader.js';
 import { BinanceTestnet } from './modules/binanceTestnet.js';
+import { Evaluator } from './modules/evaluator.js';
 
 const PAIRS = ['SOLUSDT', 'BTCUSDT', 'ETHUSDT'];
 
@@ -28,6 +29,9 @@ class App {
     this._serverTrades = [];
     this._serverPositions = [];
     this.tradeLog = [];
+    this.evaluator = new Evaluator();
+    this._evalTimer = null;
+    this._evalIntervalMin = 15;
   }
 
   async init() {
@@ -44,6 +48,7 @@ class App {
       this.ui.renderTradeHistory(this.trader);
 
       this.startRefreshLoop();
+      this.startEvaluationLoop();
       this.bindEvents();
       this.autoConnectTestnet();
       this.tryConnectServer();
@@ -226,6 +231,17 @@ class App {
     this.refreshTimer = setInterval(() => this.refreshData(), 5000);
   }
 
+  startEvaluationLoop() {
+    const ms = this._evalIntervalMin * 60 * 1000;
+    const run = () => {
+      const report = this.evaluator.snapshot(this.trader, this.signals, this.engine);
+      const nextMin = this._evalIntervalMin;
+      this.ui.renderEvaluation(report, this.evaluator.snapshots.length, nextMin);
+    };
+    setTimeout(run, 60 * 1000); // first run in 1 min
+    this._evalTimer = setInterval(run, ms);
+  }
+
   changeInterval(tf) {
     this.interval = tf;
     this.fetchAllPairCandles().then(() => {
@@ -345,6 +361,21 @@ class App {
           localStorage.setItem('bot_server_url', url);
         }
       } catch {}
+    });
+
+    document.getElementById('evalToggle')?.addEventListener('click', () => {
+      document.getElementById('evalBody')?.classList.toggle('hidden');
+      document.getElementById('evalToggle')?.classList.toggle('active');
+    });
+
+    document.getElementById('evalResetBtn')?.addEventListener('click', () => {
+      if (confirm('Reset evaluation data? This will clear all snapshots.')) {
+        this.evaluator.reset();
+        const badge = document.getElementById('evalBadge');
+        if (badge) { badge.textContent = 'Collecting...'; badge.className = 'eval-badge'; }
+        document.getElementById('evalBody')?.classList.add('hidden');
+        document.getElementById('evalToggle')?.classList.remove('active');
+      }
     });
   }
 }
