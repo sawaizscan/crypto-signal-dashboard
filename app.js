@@ -236,6 +236,10 @@ class App {
         }
       }
 
+      if (this.testnet.connected) {
+        await this.trader.syncFromTestnet();
+      }
+
       this.ui.renderPortfolio(this.trader);
       this.ui.renderPositions(this.trader);
       this.ui.renderTradeHistory(this.trader);

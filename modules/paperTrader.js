@@ -154,15 +154,16 @@ export class PaperTrader {
   }
 
   async buy(symbol, price, signal = null) {
-    const bal = this.useTestnetPortfolio ? this._testnetWalletBalance : this.cash;
-    if (bal <= 1) return null;
+    if (!price || price <= 0 || isNaN(price)) return null;
+    const bal = this.useTestnetPortfolio ? (this._testnetWalletBalance || 0) : this.cash;
+    if (typeof bal !== 'number' || bal <= 1) return null;
 
     const margin = bal * this.marginPerTrade;
-    if (margin < 1) return null;
+    if (typeof margin !== 'number' || margin < 1 || isNaN(margin)) return null;
 
     const positionValue = margin * this.leverage;
     const qty = positionValue / price;
-    if (qty <= 0) return null;
+    if (typeof qty !== 'number' || qty <= 0 || !isFinite(qty)) return null;
 
     if (this.useTestnetPortfolio) {
       await this.setLeverageOnTestnet(symbol);

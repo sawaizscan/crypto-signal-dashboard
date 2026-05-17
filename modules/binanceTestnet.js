@@ -123,12 +123,12 @@ export class BinanceTestnet {
   }
 
   getWalletPct() {
-    if (!this.account || !this.account.assets) return 0;
+    if (!this.account || !this.account.assets) return { balance: 0, unrealizedPnl: 0, crossWallet: 0, equity: 0 };
     const usdt = this.account.assets.find(a => a.asset === 'USDT');
-    if (!usdt) return 0;
-    const wb = parseFloat(usdt.walletBalance);
-    const up = parseFloat(usdt.unrealizedProfit);
-    const cross = parseFloat(usdt.crossWalletBalance);
+    if (!usdt) return { balance: 0, unrealizedPnl: 0, crossWallet: 0, equity: 0 };
+    const wb = parseFloat(usdt.walletBalance) || 0;
+    const up = parseFloat(usdt.unrealizedProfit) || 0;
+    const cross = parseFloat(usdt.crossWalletBalance) || 0;
     return { balance: wb, unrealizedPnl: up, crossWallet: cross, equity: wb + up };
   }
 
