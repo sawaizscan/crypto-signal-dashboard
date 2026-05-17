@@ -5,6 +5,7 @@ import { UIRenderer } from './modules/uiRenderer.js';
 import { PaperTrader } from './modules/paperTrader.js';
 import { BinanceTestnet } from './modules/binanceTestnet.js';
 import { Evaluator } from './modules/evaluator.js';
+import { WebSocketManager } from './modules/websocketManager.js';
 
 const PAIRS = ['SOLUSDT', 'BTCUSDT', 'ETHUSDT'];
 
@@ -22,6 +23,8 @@ class App {
     this.allTickers = [];
     this.signals = {};
     this.refreshTimer = null;
+    this.ws = new WebSocketManager();
+    this._wsConnected = false;
     this._savedApiKey = localStorage.getItem('testnet_api_key') || '1ysNwTL4RkMVrIEA1P8afA2b8b2WDZa9uscfUh2V3mMpuMTibt02EFXQ1xCLntpv';
     this._savedSecretKey = localStorage.getItem('testnet_secret_key') || 'aOTGrVdk3jr4etaPeGcOSIwJiOso0QxBiQ54ODJJuLGtGryCrUNEkpMZ4gHf2PT4';
     this.serverUrl = localStorage.getItem('bot_server_url') || '';
@@ -52,8 +55,9 @@ class App {
       this.startRefreshLoop();
       this.startEvaluationLoop();
       this.bindEvents();
-      this.autoConnectTestnet();
+      await this.autoConnectTestnet();
       this.tryConnectServer();
+      this.connectWebSockets();
     } catch (err) {
       console.error('Init error:', err);
       this.bindEvents();
@@ -255,7 +259,73 @@ class App {
 
   startRefreshLoop() {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
-    this.refreshTimer = setInterval(() => this.refreshData(), 5000);
+    this.refreshTimer = setInterval(() => this.refreshData(), 30000);
+  }
+
+  connectWebSockets() {
+    this.ws.onMarketUpdate((pair, candle) => this.handleNewCandle(pair, candle));
+    this.ws.onUserUpdate((msg) => this.handleAccountUpdate(msg));
+    this.ws.onStatusChange((type, status) => {
+      this._wsConnected = status === 'connected';
+    });
+    this.ws.connectMarket(PAIRS);
+    if (this.testnet.connected) {
+      this.ws.connectUser(this._savedApiKey, this._savedSecretKey);
+    }
+  }
+
+  handleNewCandle(pair, candle) {
+    if (!this.candles[pair]) this.candles[pair] = [];
+    this.candles[pair].push(candle);
+    if (this.candles[pair].length > 100) {
+      this.candles[pair] = this.candles[pair].slice(-100);
+    }
+    const ind = computeAllIndicators(this.candles[pair]);
+    const signal = this.engine.generateSignal(pair, this.candles[pair], ind);
+    this.signals[pair] = signal;
+    this.ui.updateSignalCard(pair, signal);
+    if (this.engine.isNewSignal(signal)) this.ui.playAlertSound();
+    if (this.autoTrade && signal.type !== 'NO TRADE' && signal.confidence >= 15) {
+      const active = this.trader.useTestnetPortfolio
+        ? new Set((this.trader.getTestnetPositions() || []).map(p => p.symbol))
+        : new Set(Object.keys(this.trader.positions));
+      if (!active.has(pair)) {
+        const sigKey = `${pair}_${signal.type}`;
+        if (!this._executedSignals[sigKey]) {
+          this.trader.executeSignal(signal).then(result => {
+            if (result) {
+              this._executedSignals[sigKey] = Date.now();
+              if (this.testnet.connected) {
+                this.trader.syncFromTestnet().then(() => {
+                  this.ui.renderPortfolio(this.trader);
+                  this.ui.renderPositions(this.trader);
+                  this.ui.renderTradeHistory(this.trader);
+                });
+              }
+            }
+          });
+        }
+      }
+    }
+    if (pair === this.activePair) {
+      this.ui.updateChart(this.candles[pair], ind);
+    }
+  }
+
+  handleAccountUpdate(msg) {
+    if (this.testnet.connected) {
+      this.trader.syncFromTestnet().then(() => {
+        const activePairs = new Set((this.trader.getTestnetPositions() || []).map(p => p.symbol));
+        for (const key of Object.keys(this._executedSignals)) {
+          const p = key.split('_')[0];
+          if (!activePairs.has(p)) delete this._executedSignals[key];
+        }
+        this.ui.renderPortfolio(this.trader);
+        this.ui.renderPositions(this.trader);
+        this.ui.renderTradeHistory(this.trader);
+        this.ui.updatePortfolioMini(this.trader.equity, this.trader.totalPnL, this.trader.totalTrades, this.trader.winRate);
+      });
+    }
   }
 
   startEvaluationLoop() {
@@ -302,6 +372,7 @@ class App {
         localStorage.setItem('testnet_api_key', apiKey);
         localStorage.setItem('testnet_secret_key', secretKey);
         await this.trader.syncFromTestnet();
+        this.ws.connectUser(apiKey, secretKey);
       }
     } catch {
       this.testnet.disconnect();
@@ -310,6 +381,7 @@ class App {
   }
 
   disconnectTestnet() {
+    this.ws.disconnectUser();
     this.testnet.disconnect();
     this.trader.setExecutor(null);
     this.trader.disableTestnetPortfolio();
