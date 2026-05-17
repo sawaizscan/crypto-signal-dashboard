@@ -3,120 +3,223 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CryptoSignal Dashboard</title>
+  <title>APEX — Live Crypto Signals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-  <div id="app">
-    <header>
-      <div class="header-left">
-        <div class="logo">&#x1f537; CryptoSignal</div>
-        <span class="disclaimer">Not financial advice &mdash; educational use only</span>
+  <div class="noise-overlay"></div>
+
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-icon">◆</span>
+        <span class="brand-name">APEX</span>
+        <span class="brand-dot">SIGNALS</span>
+      </div>
+      <div class="header-center">
+        <div class="live-badge" id="liveBadge">
+          <span class="live-dot"></span>
+          <span class="live-text">LIVE</span>
+        </div>
+        <div class="pair-indicators" id="pairIndicators">
+          <span class="pair-pill active" data-pair="SOLUSDT">SOL</span>
+          <span class="pair-pill" data-pair="BTCUSDT">BTC</span>
+          <span class="pair-pill" data-pair="ETHUSDT">ETH</span>
+        </div>
       </div>
       <div class="header-right">
-        <select id="pairSelector"></select>
-        <select id="timeframeSelector">
-          <option value="1m" selected>1m</option>
-          <option value="5m">5m</option>
-          <option value="15m">15m</option>
-          <option value="1h">1h</option>
-          <option value="4h">4h</option>
-        </select>
+        <span class="header-time" id="headerTime">--:--:--</span>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="autoTradeToggle" checked>
+          <span class="toggle-label-inner">AUTO</span>
+        </label>
       </div>
-    </header>
+    </div>
+  </header>
 
-    <div class="ticker-bar" id="tickerBar"></div>
-
-    <main>
-      <div class="dashboard-grid">
-        <section class="chart-section">
-          <div class="section-header">
-            <h2>Chart</h2>
-            <div class="chart-controls">
-              <button class="btn-icon" id="backtestBtn" title="Quick Backtest (last 50 candles)">&#x1f9ee;</button>
-              <button class="btn-icon" id="exportBtn" title="Export Signal History to CSV">&#x1f4e5;</button>
-            </div>
+  <main class="main">
+    <!-- SENTIMENT ROW -->
+    <section class="sentiment-row">
+      <div class="sentiment-card" id="dailySentiment">
+        <div class="sentiment-label">
+          <span class="tf-badge"> Daily</span>
+          <span class="sentiment-emoji">—</span>
+        </div>
+        <div class="sentiment-bar-container">
+          <div class="sentiment-bar" id="dailyBar">
+            <div class="sentiment-fill" id="dailyFill"></div>
           </div>
-          <div id="chartContainer"></div>
-        </section>
+        </div>
+        <div class="sentiment-stats">
+          <span class="ss-bear" id="dailyBear">Bear 0%</span>
+          <span class="ss-bull" id="dailyBull">Bull 0%</span>
+        </div>
+      </div>
+      <div class="sentiment-card" id="shortSentiment">
+        <div class="sentiment-label">
+          <span class="tf-badge"> Short</span>
+          <span class="sentiment-emoji">—</span>
+        </div>
+        <div class="sentiment-bar-container">
+          <div class="sentiment-bar" id="shortBar">
+            <div class="sentiment-fill" id="shortFill"></div>
+          </div>
+        </div>
+        <div class="sentiment-stats">
+          <span class="ss-bear" id="shortBear">Bear 0%</span>
+          <span class="ss-bull" id="shortBull">Bull 0%</span>
+        </div>
+      </div>
+      <div class="sentiment-card" id="portfolioMini">
+        <div class="sentiment-label"><span class="tf-badge"> Portfolio</span></div>
+        <div class="portfolio-mini-stats">
+          <div class="pm-row"><span class="pm-label">Equity</span><span class="pm-value" id="pmEquity">$10,000</span></div>
+          <div class="pm-row"><span class="pm-label">PnL</span><span class="pm-value" id="pmPnl">$0.00</span></div>
+          <div class="pm-row"><span class="pm-label">Trades</span><span class="pm-value" id="pmTrades">0</span></div>
+          <div class="pm-row"><span class="pm-label">WR</span><span class="pm-value" id="pmWr">0%</span></div>
+        </div>
+      </div>
+    </section>
 
-        <section class="signals-section">
-          <h2>Active Signals</h2>
-          <div id="signalPanel"></div>
-        </section>
+    <!-- SIGNALS ROW -->
+    <section class="signals-row" id="signalsRow">
+      <div class="signal-card" data-pair="SOLUSDT">
+        <div class="sc-top">
+          <div class="sc-pair">SOL/USDT</div>
+          <div class="sc-type" id="scType-SOLUSDT">—</div>
+        </div>
+        <div class="sc-price-row">
+          <span class="sc-price-label">Price</span>
+          <span class="sc-price" id="scPrice-SOLUSDT">—</span>
+        </div>
+        <div class="sc-confidence">
+          <div class="sc-conf-bar"><div class="sc-conf-fill" id="scConf-SOLUSDT" style="width:0%"></div></div>
+          <span class="sc-conf-text" id="scConfText-SOLUSDT">0%</span>
+        </div>
+        <div class="sc-levels">
+          <div class="sc-level"><span class="sl-label">SL</span><span class="sl-val" id="scSl-SOLUSDT">—</span></div>
+          <div class="sc-level"><span class="tp-label">TP1</span><span class="tp-val" id="scTp1-SOLUSDT">—</span></div>
+          <div class="sc-level"><span class="tp-label">TP2</span><span class="tp-val" id="scTp2-SOLUSDT">—</span></div>
+        </div>
+        <div class="sc-reasons" id="scReasons-SOLUSDT"></div>
+        <div class="sc-trend" id="scTrend-SOLUSDT"></div>
       </div>
 
-      <section class="market-overview-section">
-        <h2>Market Overview</h2>
-        <div id="marketGrid"></div>
-      </section>
+      <div class="signal-card" data-pair="BTCUSDT">
+        <div class="sc-top">
+          <div class="sc-pair">BTC/USDT</div>
+          <div class="sc-type" id="scType-BTCUSDT">—</div>
+        </div>
+        <div class="sc-price-row">
+          <span class="sc-price-label">Price</span>
+          <span class="sc-price" id="scPrice-BTCUSDT">—</span>
+        </div>
+        <div class="sc-confidence">
+          <div class="sc-conf-bar"><div class="sc-conf-fill" id="scConf-BTCUSDT" style="width:0%"></div></div>
+          <span class="sc-conf-text" id="scConfText-BTCUSDT">0%</span>
+        </div>
+        <div class="sc-levels">
+          <div class="sc-level"><span class="sl-label">SL</span><span class="sl-val" id="scSl-BTCUSDT">—</span></div>
+          <div class="sc-level"><span class="tp-label">TP1</span><span class="tp-val" id="scTp1-BTCUSDT">—</span></div>
+          <div class="sc-level"><span class="tp-label">TP2</span><span class="tp-val" id="scTp2-BTCUSDT">—</span></div>
+        </div>
+        <div class="sc-reasons" id="scReasons-BTCUSDT"></div>
+        <div class="sc-trend" id="scTrend-BTCUSDT"></div>
+      </div>
 
-      <section class="portfolio-section">
-        <div class="section-header">
-          <h2>&#x1f4b0; Paper Trading Portfolio <span class="exec-mode-badge local" id="execModeBadge">Local</span></h2>
-          <div class="portfolio-controls">
-            <label class="toggle-label">
-              <span>Auto-Trade</span>
-              <input type="checkbox" id="autoTradeToggle">
-              <span class="toggle-slider"></span>
-            </label>
-            <button class="btn-icon" id="resetPortfolioBtn" title="Reset portfolio">&#x1f504;</button>
+      <div class="signal-card" data-pair="ETHUSDT">
+        <div class="sc-top">
+          <div class="sc-pair">ETH/USDT</div>
+          <div class="sc-type" id="scType-ETHUSDT">—</div>
+        </div>
+        <div class="sc-price-row">
+          <span class="sc-price-label">Price</span>
+          <span class="sc-price" id="scPrice-ETHUSDT">—</span>
+        </div>
+        <div class="sc-confidence">
+          <div class="sc-conf-bar"><div class="sc-conf-fill" id="scConf-ETHUSDT" style="width:0%"></div></div>
+          <span class="sc-conf-text" id="scConfText-ETHUSDT">0%</span>
+        </div>
+        <div class="sc-levels">
+          <div class="sc-level"><span class="sl-label">SL</span><span class="sl-val" id="scSl-ETHUSDT">—</span></div>
+          <div class="sc-level"><span class="tp-label">TP1</span><span class="tp-val" id="scTp1-ETHUSDT">—</span></div>
+          <div class="sc-level"><span class="tp-label">TP2</span><span class="tp-val" id="scTp2-ETHUSDT">—</span></div>
+        </div>
+        <div class="sc-reasons" id="scReasons-ETHUSDT"></div>
+        <div class="sc-trend" id="scTrend-ETHUSDT"></div>
+      </div>
+    </section>
+
+    <!-- BOTTOM ROW -->
+    <section class="bottom-row">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <span class="chart-title" id="chartTitle">SOL/USDT</span>
+          <div class="chart-controls">
+            <button class="chart-btn active" data-tf="1m">1m</button>
+            <button class="chart-btn" data-tf="5m">5m</button>
+            <button class="chart-btn" data-tf="15m">15m</button>
           </div>
         </div>
-        <div id="portfolioSummary">
-          <div class="stat-card"><div class="stat-label">Balance</div><div class="stat-value neutral">$10,000</div></div>
-          <div class="stat-card"><div class="stat-label">P&amp;L</div><div class="stat-value neutral">$0.00</div></div>
-          <div class="stat-card"><div class="stat-label">Return</div><div class="stat-value neutral">0.00%</div></div>
-          <div class="stat-card"><div class="stat-label">Open</div><div class="stat-value neutral">0</div></div>
-          <div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value neutral">0</div></div>
-          <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value neutral">0%</div></div>
+        <div id="chartContainer"></div>
+      </div>
+      <div class="right-panel">
+        <div class="right-panel-section">
+          <div class="section-label">Portfolio</div>
+          <div id="portfolioSummary" class="portfolio-summary-grid"></div>
         </div>
-        <div id="positionsPanel"><div class="no-positions">No open positions</div></div>
-        <div id="tradeHistory"><div class="no-trades">No trade history yet</div></div>
-      </section>
-
-      <section class="settings-panel">
-        <button class="settings-toggle" id="settingsToggle">&#x2699; Settings</button>
-        <div class="settings-body hidden" id="settingsBody">
-          <div class="settings-group">
-            <h3>&#x1f5a5; Bot Server</h3>
-            <div class="server-status" id="serverStatus">Checking for bot server...</div>
-            <label for="serverUrl">Server URL</label>
-            <div class="server-url-row">
-              <input type="text" id="serverUrl" placeholder="http://localhost:3001" autocomplete="off">
-              <button class="btn-icon" id="connectServerBtn">Connect</button>
-            </div>
-            <div class="settings-info">
-              Run <code>node server/index.js</code> on a 24/7 machine (VPS, Raspberry Pi, your PC).<br>
-              The bot trades continuously and reports results here.
-            </div>
-          </div>
-          <div class="settings-group">
-            <h3>&#x1f510; Binance Testnet</h3>
-            <label for="testnetApiKey">API Key</label>
-            <input type="text" id="testnetApiKey" placeholder="Enter your Binance Futures Testnet API key" autocomplete="off">
-            <label for="testnetSecretKey">Secret Key</label>
-            <input type="password" id="testnetSecretKey" placeholder="Enter your Binance Futures Testnet secret key" autocomplete="off">
-            <div class="settings-actions">
-              <button class="btn-icon" id="connectTestnetBtn">Connect</button>
-              <button class="btn-icon" id="disconnectTestnetBtn">Disconnect</button>
-            </div>
-            <div class="settings-status" id="testnetStatus"></div>
-            <div class="settings-info">
-              Get free testnet API keys at <a href="https://testnet.binancefuture.com/" target="_blank" rel="noopener">testnet.binancefuture.com</a>.<br>
-              Funds are virtual — no real money involved. Keys are stored locally in your browser.
-            </div>
-          </div>
+        <div class="right-panel-section">
+          <div class="section-label">Positions</div>
+          <div id="positionsPanel"><div class="empty-state">No open positions</div></div>
         </div>
-      </section>
+        <div class="right-panel-section history-section">
+          <div class="history-header">
+            <span class="section-label">Trade Log</span>
+            <button class="reset-btn" id="resetPortfolioBtn">⟳</button>
+          </div>
+          <div id="tradeHistory"><div class="empty-state">No trades yet</div></div>
+        </div>
+      </div>
+    </section>
 
-      <section class="hot-pairs-section" id="hotPairsSection">
-        <h2>&#x26a1; Hot Pairs</h2>
-        <div id="hotPairsGrid"></div>
-      </section>
-    </main>
-  </div>
+    <!-- SECRETS / SETTINGS FOOTER -->
+    <footer class="footer">
+      <div class="footer-inner">
+        <span class="footer-brand">◆ APEX SIGNALS</span>
+        <span class="footer-disc">Educational — Not Financial Advice</span>
+        <span class="footer-bot" id="footerBotStatus">Bot: —</span>
+        <button class="footer-settings-btn" id="settingsToggle">⚙</button>
+      </div>
+    </footer>
+    <div class="settings-modal hidden" id="settingsModal">
+      <div class="settings-content">
+        <div class="settings-close" id="settingsClose">✕</div>
+        <h3>Settings</h3>
+        <div class="setting-row">
+          <label>Server URL</label>
+          <input type="text" id="serverUrl" placeholder="http://localhost:3001">
+          <button id="connectServerBtn">Connect</button>
+        </div>
+        <div class="setting-row">
+          <label>Testnet API Key</label>
+          <input type="text" id="testnetApiKey" placeholder="Binance Futures Testnet API key">
+        </div>
+        <div class="setting-row">
+          <label>Testnet Secret</label>
+          <input type="password" id="testnetSecretKey" placeholder="Binance Futures Testnet secret key">
+        </div>
+        <div class="setting-actions">
+          <button id="connectTestnetBtn">Connect Testnet</button>
+          <button id="disconnectTestnetBtn">Disconnect</button>
+        </div>
+        <div id="testnetStatus" class="setting-status"></div>
+        <div id="serverStatus" class="setting-status"></div>
+      </div>
+    </div>
+  </main>
 
   <script type="module" src="app.js"></script>
 </body>

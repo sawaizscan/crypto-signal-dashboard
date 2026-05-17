@@ -1,14 +1,11 @@
-/**
- * App — main orchestrator for the CryptoSignal Dashboard
- * Initializes modules, runs the real-time loop, handles user interaction
- */
-
 import { DataFetcher } from './modules/dataFetcher.js';
 import { computeAllIndicators } from './modules/indicators.js';
 import { SignalEngine } from './modules/signalEngine.js';
 import { UIRenderer } from './modules/uiRenderer.js';
 import { PaperTrader } from './modules/paperTrader.js';
 import { BinanceTestnet } from './modules/binanceTestnet.js';
+
+const PAIRS = ['SOLUSDT', 'BTCUSDT', 'ETHUSDT'];
 
 class App {
   constructor() {
@@ -18,69 +15,40 @@ class App {
     this.trader = new PaperTrader(10000);
     this.testnet = new BinanceTestnet();
     this.autoTrade = true;
-
-    this.trader.setSignalEngine(this.engine);
-
-    this.currentSymbol = 'SOLUSDT';
+    this.activePair = 'SOLUSDT';
     this.interval = '1m';
+    this.candles = {};
     this.allTickers = [];
-    this.candles = [];
-    this.signals = [];
+    this.signals = {};
     this.refreshTimer = null;
-
     this._savedApiKey = localStorage.getItem('testnet_api_key') || '1ysNwTL4RkMVrIEA1P8afA2b8b2WDZa9uscfUh2V3mMpuMTibt02EFXQ1xCLntpv';
     this._savedSecretKey = localStorage.getItem('testnet_secret_key') || 'aOTGrVdk3jr4etaPeGcOSIwJiOso0QxBiQ54ODJJuLGtGryCrUNEkpMZ4gHf2PT4';
-    this.hotPairs = [];
-    this.ready = false;
-
     this.serverUrl = localStorage.getItem('bot_server_url') || '';
     this.serverMode = false;
     this._serverTrades = [];
     this._serverPositions = [];
+    this.tradeLog = [];
   }
 
   async init() {
     try {
-      this.ui.showLoading('signalPanel', 'Initializing...');
-      this.ui.showLoading('marketGrid', 'Loading markets...');
-
       this.ui.initChart('chartContainer');
-
-      const { klines, tickers } = await this.fetcher.fetchInitialData(this.currentSymbol, this.interval);
-      this.candles = klines;
+      const tickers = await this.fetcher.fetchTopPairs(30);
       this.allTickers = tickers;
 
-      if (tickers.length > 0 && !tickers.some(t => t.symbol === this.currentSymbol)) {
-        this.currentSymbol = tickers[0].symbol;
-      }
-
-      this.ui.populatePairSelector(tickers, this.currentSymbol);
-      this.ui.renderTickerBar(tickers, this.currentSymbol);
-      this.ui.renderMarketOverview(tickers);
-
-      await this.analyzeAndRender();
-      this.detectHotPairs();
+      await this.fetchAllPairCandles();
+      await this.runAllAnalysis();
 
       this.ui.renderPortfolio(this.trader);
       this.ui.renderPositions(this.trader);
       this.ui.renderTradeHistory(this.trader);
 
-      this.ready = true;
       this.startRefreshLoop();
       this.bindEvents();
-      document.getElementById('autoTradeToggle').checked = true;
       this.autoConnectTestnet();
-
       this.tryConnectServer();
     } catch (err) {
       console.error('Init error:', err);
-      this.ui.showError('signalPanel', 'Failed to load data. Check console for details.');
-      try {
-        this.ui.renderPortfolio(this.trader);
-        this.ui.renderPositions(this.trader);
-        this.ui.renderTradeHistory(this.trader);
-      } catch (_) {}
-      this.ready = true;
       this.bindEvents();
       setTimeout(() => this.init(), 5000);
     }
@@ -97,181 +65,159 @@ class App {
           this.serverUrl = url;
           this.serverMode = true;
           localStorage.setItem('bot_server_url', url);
-          this.ui.renderServerStatus('connected', `Bot server connected`);
-          console.log(`Connected to bot server at ${url}`);
           return;
         }
       } catch {}
     }
     this.serverMode = false;
-    this.ui.renderServerStatus('disconnected', 'No bot server — running locally');
   }
 
-  async analyzeAndRender() {
-    if (!this.candles || this.candles.length < 30) {
-      this.ui.showLoading('signalPanel', 'Insufficient data...');
-      return;
-    }
-
-    const ind = computeAllIndicators(this.candles);
-    const signal = this.engine.generateSignal(this.currentSymbol, this.candles, ind);
-
-    const signalEntry = this.signals.find(s => s.pair === this.currentSymbol);
-    if (signalEntry) {
-      Object.assign(signalEntry, signal);
-    } else {
-      this.signals.push(signal);
-    }
-
-    if (this.engine.isNewSignal(signal)) {
-      this.ui.playAlertSound();
-    }
-
-    this.ui.updateChart(this.candles, ind);
-    this.ui.renderSignal(signal);
-
-    if (this.autoTrade && signal.type !== 'NO TRADE' && !this.trader.positions[signal.pair]) {
-      const priceMap = {};
-      priceMap[signal.pair] = signal.entry;
-      this.trader.updatePrices(priceMap);
-      await this.trader.executeSignal(signal);
-    }
-  }
-
-  async scanAllSignals() {
-    // SOL first (highest WR in backtests), then top volume pairs
-    const solTicker = this.allTickers.find(t => t.symbol === 'SOLUSDT');
-    let topPairs = this.allTickers.slice(0, 10);
-    if (solTicker && !topPairs.some(t => t.symbol === 'SOLUSDT')) {
-      topPairs = [solTicker, ...topPairs.slice(0, 9)];
-    }
-
-    const signalPromises = topPairs.map(async (ticker) => {
-      try {
-        const klines = await this.fetcher.fetchKlines(ticker.symbol, this.interval, 100);
-        if (klines.length < 30) return null;
-        const ind = computeAllIndicators(klines);
-        return this.engine.generateSignal(ticker.symbol, klines, ind);
-      } catch {
-        return null;
-      }
-    });
-
-    const results = (await Promise.all(signalPromises)).filter(Boolean);
-
-    results.sort((a, b) => {
-      const scoreA = a.type === 'BUY' ? a.confidence : a.type === 'SELL' ? a.confidence : -a.confidence;
-      const scoreB = b.type === 'BUY' ? b.confidence : b.type === 'SELL' ? b.confidence : -b.confidence;
-      return scoreB - scoreA;
-    });
-
-    for (const s of results) {
-      const existing = this.signals.find(x => x.pair === s.pair);
-      if (existing) Object.assign(existing, s);
-      else this.signals.push(s);
-    }
-
-    if (this.autoTrade) {
-      for (const s of results.slice(0, 5)) {
-        if (s.type !== 'NO TRADE' && s.confidence >= 15 && !this.trader.positions[s.pair]) {
-          await this.trader.executeSignal(s);
+  async fetchAllPairCandles() {
+    const results = await Promise.all(
+      PAIRS.map(async (pair) => {
+        try {
+          const klines = await this.fetcher.fetchKlines(pair, this.interval, 100);
+          return { pair, klines };
+        } catch {
+          return { pair, klines: [] };
         }
+      })
+    );
+    for (const r of results) {
+      this.candles[r.pair] = r.klines;
+    }
+  }
+
+  async runAllAnalysis() {
+    for (const pair of PAIRS) {
+      const klines = this.candles[pair];
+      if (!klines || klines.length < 30) continue;
+      const ind = computeAllIndicators(klines);
+      const signal = this.engine.generateSignal(pair, klines, ind);
+      this.signals[pair] = signal;
+      this.ui.updateSignalCard(pair, signal);
+      if (this.engine.isNewSignal(signal)) {
+        this.ui.playAlertSound();
       }
     }
 
-    this.ui.renderSignalsList(results.slice(0, 5));
+    await this.computeSentiment();
   }
 
-  detectHotPairs() {
-    this.hotPairs = this.allTickers
-      .filter(t => t.volume > 0)
-      .map(t => {
-        const avgVol = this.allTickers.reduce((s, x) => s + x.volume, 0) / this.allTickers.length;
-        const surgeRatio = t.volume / (avgVol || 1);
-        return { ...t, surgeRatio };
-      })
-      .filter(t => t.surgeRatio > 2.5 && Math.abs(t.change) > 3)
-      .sort((a, b) => b.surgeRatio - a.surgeRatio)
-      .slice(0, 6);
+  async computeSentiment() {
+    const dailySentiment = await this._computeDailySentiment();
+    const shortSentiment = this._computeShortSentiment();
 
-    this.ui.renderHotPairs(this.hotPairs);
+    const bearPct = (1 - shortSentiment.bullScore) * 100;
+    this.ui.updateSentiment(
+      { bull: dailySentiment.bullScore * 100, bear: (1 - dailySentiment.bullScore) * 100, emoji: dailySentiment.emoji },
+      { bull: shortSentiment.bullScore * 100, bear: bearPct, emoji: shortSentiment.emoji }
+    );
+  }
+
+  async _computeDailySentiment() {
+    let bullCount = 0;
+    let totalPairs = 0;
+    for (const pair of PAIRS) {
+      try {
+        const klines = await this.fetcher.fetchKlines(pair, '1d', 100);
+        if (klines.length < 50) continue;
+        const closes = klines.map(c => c.close);
+        const { ema20, ema50, ema200, rsi } = computeAllIndicators(klines);
+        const lastIdx = klines.length - 1;
+        const price = closes[lastIdx];
+        const p20 = ema20[lastIdx];
+        const p50 = ema50[lastIdx];
+        const p200 = ema200[lastIdx];
+        const r = rsi[lastIdx];
+        let score = 0;
+        if (price > p20) score++;
+        if (p20 > p50) score++;
+        if (p50 > p200) score++;
+        if (r > 50) score++;
+        if (r > 60) score++;
+        if (closes[lastIdx] > closes[lastIdx - 1]) score++;
+        if (closes[lastIdx - 1] > closes[lastIdx - 2]) score++;
+        bullCount += score / 7;
+        totalPairs++;
+      } catch {}
+    }
+    const avgBullScore = totalPairs > 0 ? bullCount / totalPairs : 0.5;
+    let emoji = avgBullScore > 0.6 ? '🟢' : avgBullScore > 0.4 ? '🟡' : '🔴';
+    return { bullScore: avgBullScore, emoji };
+  }
+
+  _computeShortSentiment() {
+    let bullCount = 0;
+    let totalPairs = 0;
+    for (const pair of PAIRS) {
+      const klines = this.candles[pair];
+      if (!klines || klines.length < 30) continue;
+      const ind = computeAllIndicators(klines);
+      const lastIdx = klines.length - 1;
+      const price = ind.closes[lastIdx];
+      const p20 = ind.ema20[lastIdx];
+      const p50 = ind.ema50[lastIdx];
+      const r = ind.rsi[lastIdx];
+      let score = 0;
+      if (price > p20) score++;
+      if (p20 > p50) score++;
+      if (r > 50) score++;
+      if (ind.macd.histogram[lastIdx] > 0) score++;
+      if (ind.breakouts[lastIdx]?.direction === 'bullish') score++;
+      if (ind.trend === 'bullish') score++;
+      if (klines[lastIdx].close > klines[lastIdx].open) score++;
+      bullCount += score / 7;
+      totalPairs++;
+    }
+    const avgBullScore = totalPairs > 0 ? bullCount / totalPairs : 0.5;
+    let emoji = avgBullScore > 0.55 ? '🟢' : avgBullScore > 0.45 ? '🟡' : '🔴';
+    return { bullScore: avgBullScore, emoji };
   }
 
   async refreshData() {
     try {
-      if (this.serverMode && this.serverUrl) {
-        await this.pollServer();
-        return;
-      }
-
       const tickers = await this.fetcher.fetchTopPairs(30);
       this.allTickers = tickers;
 
-      this.ui.renderTickerBar(tickers, this.currentSymbol);
-      this.ui.renderMarketOverview(tickers);
-
       const priceMap = {};
       for (const t of tickers) {
-        priceMap[t.symbol] = t.price;
+        if (PAIRS.includes(t.symbol)) priceMap[t.symbol] = t.price;
       }
       this.trader.updatePrices(priceMap);
       await this.trader.checkStopLosses(priceMap);
 
-      const klines = await this.fetcher.fetchKlines(this.currentSymbol, this.interval, 100);
-      this.candles = klines;
+      await this.fetchAllPairCandles();
+      await this.runAllAnalysis();
 
-      await this.analyzeAndRender();
-      this.detectHotPairs();
-      this.scanAllSignals();
+      if (this.activePair && this.candles[this.activePair]?.length > 0) {
+        const ind = computeAllIndicators(this.candles[this.activePair]);
+        this.ui.updateChart(this.candles[this.activePair], ind);
+      }
 
-      if (this.testnet.connected) {
-        await this.trader.syncFromTestnet();
-        const pnl = this.trader.totalPnL;
-        const sign = pnl >= 0 ? '+' : '';
-        this.ui.renderTestnetStatus('connected', `Wallet: $${this.trader._testnetWalletBalance.toFixed(2)} | UPnL: ${this.trader._testnetUnrealizedPnl >= 0 ? '+' : ''}$${this.trader._testnetUnrealizedPnl.toFixed(2)} | Total PnL: ${sign}$${pnl.toFixed(2)}`);
+      if (this.autoTrade) {
+        for (const pair of PAIRS) {
+          const s = this.signals[pair];
+          if (s && s.type !== 'NO TRADE' && s.confidence >= 15 && !this.trader.positions[pair]) {
+            await this.trader.executeSignal(s);
+          }
+        }
       }
 
       this.ui.renderPortfolio(this.trader);
       this.ui.renderPositions(this.trader);
       this.ui.renderTradeHistory(this.trader);
+
+      const miniPnl = this.trader.totalPnL;
+      this.ui.updatePortfolioMini(this.trader.equity, miniPnl, this.trader.totalTrades, this.trader.winRate);
+
+      this.ui.updateTime();
+
+      if (this.testnet.connected) {
+        await this.trader.syncFromTestnet();
+      }
     } catch (err) {
       console.error('Refresh error:', err);
-    }
-  }
-
-  async pollServer() {
-    try {
-      const base = this.serverUrl;
-      const [status, trades, positions, tickerData] = await Promise.all([
-        fetch(`${base}/api/status`).then(r => r.json()),
-        fetch(`${base}/api/trades`).then(r => r.json()),
-        fetch(`${base}/api/positions`).then(r => r.json()),
-        fetch(`${base}/api/ticker`).then(r => r.json()).catch(() => []),
-      ]);
-
-      if (tickerData.length > 0) this.allTickers = tickerData;
-
-      this.ui.renderTickerBar(tickerData, this.currentSymbol);
-      this.ui.renderMarketOverview(tickerData);
-
-      if (status) {
-        this.ui.renderServerStatus('connected', `Bot: $${status.equity} (${status.pnlPct}%) | WR: ${status.winRate}% | Trades: ${status.trades} | Uptime: ${Math.floor(status.uptime / 60)}m`);
-      }
-
-      if (trades) {
-        this._serverTrades = trades;
-        this.ui.renderTradeHistory({ trades });
-      }
-
-      if (positions) {
-        this._serverPositions = positions;
-        this.ui.renderServerPositions(positions);
-      }
-
-      this.detectHotPairs();
-    } catch (err) {
-      this.serverMode = false;
-      this.ui.renderServerStatus('disconnected', 'Bot server lost — switched to local');
     }
   }
 
@@ -280,49 +226,31 @@ class App {
     this.refreshTimer = setInterval(() => this.refreshData(), 5000);
   }
 
-  async changePair(symbol) {
-    if (symbol === this.currentSymbol) return;
-    this.currentSymbol = symbol;
-    this.ui.showLoading('signalPanel', 'Loading pair...');
-
-    try {
-      const klines = await this.fetcher.fetchKlines(symbol, this.interval, 100);
-      this.candles = klines;
-
-      document.getElementById('pairSelector').value = symbol;
-      this.ui.renderTickerBar(this.allTickers, symbol);
-
-      await this.analyzeAndRender();
-    } catch (err) {
-      console.error('Pair change error:', err);
-      this.ui.showError('signalPanel', 'Error loading pair data');
-    }
+  changeInterval(tf) {
+    this.interval = tf;
+    this.fetchAllPairCandles().then(() => {
+      this.runAllAnalysis();
+      if (this.activePair && this.candles[this.activePair]?.length > 0) {
+        const ind = computeAllIndicators(this.candles[this.activePair]);
+        this.ui.updateChart(this.candles[this.activePair], ind);
+      }
+    });
   }
 
-  async changeTimeframe(tf) {
-    this.interval = tf;
-    this.ui.showLoading('signalPanel', 'Changing timeframe...');
-
-    try {
-      const klines = await this.fetcher.fetchKlines(this.currentSymbol, tf, 100);
-      this.candles = klines;
-      await this.analyzeAndRender();
-    } catch (err) {
-      console.error('Timeframe change error:', err);
+  setActivePair(pair) {
+    this.activePair = pair;
+    this.ui.setActivePair(pair);
+    if (this.candles[pair]?.length > 0) {
+      const ind = computeAllIndicators(this.candles[pair]);
+      this.ui.updateChart(this.candles[pair], ind);
+      this.ui.updateChartTitle(pair);
     }
   }
 
   async connectTestnet() {
-    const apiKey = document.getElementById('testnetApiKey').value.trim();
-    const secretKey = document.getElementById('testnetSecretKey').value.trim();
-
-    if (!apiKey || !secretKey) {
-      this.ui.renderTestnetStatus('disconnected', 'Please enter both API key and secret key');
-      return;
-    }
-
-    this.ui.renderTestnetStatus('loading', 'Connecting to Binance Futures Testnet...');
-
+    const apiKey = document.getElementById('testnetApiKey')?.value.trim();
+    const secretKey = document.getElementById('testnetSecretKey')?.value.trim();
+    if (!apiKey || !secretKey) return;
     try {
       const success = await this.testnet.setKeys(apiKey, secretKey);
       if (success) {
@@ -331,12 +259,8 @@ class App {
         localStorage.setItem('testnet_api_key', apiKey);
         localStorage.setItem('testnet_secret_key', secretKey);
         await this.trader.syncFromTestnet();
-        const w = this.testnet.getWalletPct();
-        this.ui.renderTestnetStatus('connected', `Testnet: $${w.balance.toFixed(2)} | Equity: $${w.equity.toFixed(2)}`);
-        this.ui.playAlertSound();
       }
-    } catch (err) {
-      this.ui.renderTestnetStatus('disconnected', `Connection failed: ${err.message}`);
+    } catch {
       this.testnet.disconnect();
       this.trader.setExecutor(null);
     }
@@ -348,95 +272,70 @@ class App {
     this.trader.disableTestnetPortfolio();
     localStorage.removeItem('testnet_api_key');
     localStorage.removeItem('testnet_secret_key');
-    this.ui.renderTestnetStatus('disconnected', 'Disconnected from testnet');
   }
 
   async autoConnectTestnet() {
     if (this._savedApiKey && this._savedSecretKey) {
-      this.ui.setTestnetKeyFields(this._savedApiKey, this._savedSecretKey);
-      this.ui.renderTestnetStatus('loading', 'Auto-connecting to testnet...');
       try {
         const success = await this.testnet.setKeys(this._savedApiKey, this._savedSecretKey);
         if (success) {
           this.trader.setExecutor(this.testnet);
           this.trader.enableTestnetPortfolio();
-          localStorage.setItem('testnet_api_key', this._savedApiKey);
-          localStorage.setItem('testnet_secret_key', this._savedSecretKey);
           await this.trader.syncFromTestnet();
-          const w = this.testnet.getWalletPct();
-          this.ui.renderTestnetStatus('connected', `Testnet: $${w.balance.toFixed(2)} | Equity: $${w.equity.toFixed(2)}`);
         }
       } catch {
         this.testnet.disconnect();
         this.trader.setExecutor(null);
-        this.ui.renderTestnetStatus('disconnected', 'Auto-connect failed — check keys in settings');
       }
     }
   }
 
   bindEvents() {
-    document.getElementById('pairSelector').addEventListener('change', (e) => {
-      this.changePair(e.target.value);
+    document.querySelectorAll('.pair-pill').forEach(el => {
+      el.addEventListener('click', () => {
+        const pair = el.dataset.pair;
+        this.setActivePair(pair);
+      });
     });
 
-    document.getElementById('timeframeSelector').addEventListener('change', (e) => {
-      this.changeTimeframe(e.target.value);
+    document.querySelectorAll('.chart-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+        this.changeInterval(el.dataset.tf);
+      });
     });
 
-    document.addEventListener('pair-change', (e) => {
-      this.changePair(e.detail);
-    });
-
-    document.getElementById('backtestBtn').addEventListener('click', () => {
-      if (this.candles.length < 50) return;
-      const results = this.engine.runBacktest(this.candles);
-      this.ui.showBacktestModal(results);
-    });
-
-    document.getElementById('exportBtn').addEventListener('click', () => {
-      this.ui.exportSignalHistoryToCSV(this.engine.signalHistory);
-    });
-
-    document.getElementById('autoTradeToggle').addEventListener('change', (e) => {
+    document.getElementById('autoTradeToggle')?.addEventListener('change', (e) => {
       this.autoTrade = e.target.checked;
-      if (this.autoTrade) {
-        this.ui.playAlertSound();
-      }
     });
 
-    document.getElementById('resetPortfolioBtn').addEventListener('click', () => {
+    document.getElementById('resetPortfolioBtn')?.addEventListener('click', () => {
       if (this.trader.useTestnetPortfolio) {
-        if (confirm('Reset to testnet balance? This will just reload from the testnet API.')) {
-          this.trader.syncFromTestnet();
-          this.ui.renderPortfolio(this.trader);
-          this.ui.renderPositions(this.trader);
-          this.ui.renderTradeHistory(this.trader);
+        this.trader.syncFromTestnet();
+      } else {
+        if (confirm('Reset paper trading portfolio to $10,000?')) {
+          this.trader.reset(10000);
         }
-        return;
       }
-      if (confirm('Reset paper trading portfolio to $10,000? This will clear all positions and history.')) {
-        this.trader.reset(10000);
-        this.ui.renderPortfolio(this.trader);
-        this.ui.renderPositions(this.trader);
-        this.ui.renderTradeHistory(this.trader);
-      }
+      this.ui.renderPortfolio(this.trader);
+      this.ui.renderPositions(this.trader);
+      this.ui.renderTradeHistory(this.trader);
     });
 
-    document.getElementById('settingsToggle').addEventListener('click', () => {
-      const body = document.getElementById('settingsBody');
-      body.classList.toggle('hidden');
+    document.getElementById('settingsToggle')?.addEventListener('click', () => {
+      document.getElementById('settingsModal')?.classList.toggle('hidden');
     });
 
-    document.getElementById('connectTestnetBtn').addEventListener('click', () => {
-      this.connectTestnet();
+    document.getElementById('settingsClose')?.addEventListener('click', () => {
+      document.getElementById('settingsModal')?.classList.add('hidden');
     });
 
-    document.getElementById('disconnectTestnetBtn').addEventListener('click', () => {
-      this.disconnectTestnet();
-    });
+    document.getElementById('connectTestnetBtn')?.addEventListener('click', () => this.connectTestnet());
+    document.getElementById('disconnectTestnetBtn')?.addEventListener('click', () => this.disconnectTestnet());
 
-    document.getElementById('connectServerBtn').addEventListener('click', async () => {
-      const url = document.getElementById('serverUrl').value.trim();
+    document.getElementById('connectServerBtn')?.addEventListener('click', async () => {
+      const url = document.getElementById('serverUrl')?.value.trim();
       if (!url) return;
       try {
         const resp = await fetch(`${url}/api/health`);
@@ -444,18 +343,8 @@ class App {
           this.serverUrl = url;
           this.serverMode = true;
           localStorage.setItem('bot_server_url', url);
-          this.ui.renderServerStatus('connected', `Bot server connected`);
-        } else {
-          this.ui.renderServerStatus('disconnected', `Server at ${url} not responding`);
         }
-      } catch {
-        this.ui.renderServerStatus('disconnected', `Could not connect to ${url}`);
-      }
-    });
-
-    document.getElementById('serverUrl').addEventListener('change', (e) => {
-      this.serverUrl = e.target.value.trim();
-      localStorage.setItem('bot_server_url', this.serverUrl);
+      } catch {}
     });
   }
 }
